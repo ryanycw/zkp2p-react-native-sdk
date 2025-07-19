@@ -25,7 +25,7 @@ export type {
   DepositVerifierData,
   Currency,
   IntentSignalRequest,
-  QuoteMaxTokenForFiatRequest,
+  QuoteRequest,
   QuoteResponse,
   GetPayeeDetailsRequest,
   GetPayeeDetailsResponse,

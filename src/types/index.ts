@@ -164,7 +164,7 @@ export type PostDepositDetailsResponse = {
   statusCode: number;
 };
 
-export type QuoteMaxTokenForFiatRequest = {
+export type QuoteRequest = {
   paymentPlatforms: string[];
   fiatCurrency: string;
   user: string;
@@ -173,7 +173,9 @@ export type QuoteMaxTokenForFiatRequest = {
   destinationToken: string;
   referrer?: string;
   useMultihop?: boolean;
-  exactFiatAmount: string;
+  quotesToReturn?: number;
+  amount: string;
+  isExactFiat?: boolean; // defaults to true
 };
 
 export type FiatResponse = {

@@ -3,7 +3,7 @@ import type {
   PostDepositDetailsRequest,
   SignalIntentResponse,
   PostDepositDetailsResponse,
-  QuoteMaxTokenForFiatRequest,
+  QuoteRequest,
   QuoteResponse,
   GetPayeeDetailsRequest,
   GetPayeeDetailsResponse,
@@ -52,19 +52,59 @@ export async function apiPostDepositDetails(
 }
 
 export async function apiGetQuote(
-  req: QuoteMaxTokenForFiatRequest,
+  req: QuoteRequest,
   baseApiUrl: string
 ): Promise<QuoteResponse> {
-  const res = await fetch(`${baseApiUrl}/quote/exact-fiat`, {
+  // Validate quotesToReturn if provided
+  if (req.quotesToReturn !== undefined) {
+    if (!Number.isInteger(req.quotesToReturn) || req.quotesToReturn < 1) {
+      throw new Error('quotesToReturn must be a positive integer');
+    }
+  }
+
+  // Default isExactFiat to true if not specified
+  const isExactFiat = req.isExactFiat !== false;
+
+  // Determine endpoint based on isExactFiat
+  const endpoint = isExactFiat ? 'exact-fiat' : 'exact-token';
+
+  // Build URL with query parameters
+  let url = `${baseApiUrl}/quote/${endpoint}`;
+  if (req.quotesToReturn) {
+    url += `?quotesToReturn=${req.quotesToReturn}`;
+  }
+
+  // Create request body with appropriate field name
+  const requestBody = {
+    ...req,
+    [isExactFiat ? 'exactFiatAmount' : 'exactTokenAmount']: req.amount,
+    // Remove our custom fields before sending to API
+    amount: undefined,
+    isExactFiat: undefined,
+    quotesToReturn: undefined, // Remove from body since it's in query params
+  };
+
+  // Clean up undefined fields
+  Object.keys(requestBody).forEach((key) => {
+    if (requestBody[key as keyof typeof requestBody] === undefined) {
+      delete requestBody[key as keyof typeof requestBody];
+    }
+  });
+
+  const res = await fetch(url, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify(req),
+    body: JSON.stringify(requestBody),
   });
+
   if (!res.ok) {
     const errorText = await res.text();
     throw new Error(`Failed to get quote: ${errorText}`);
   }
-  return res.json();
+
+  const response: QuoteResponse = await res.json();
+
+  return response;
 }
 
 export async function apiGetPayeeDetails(

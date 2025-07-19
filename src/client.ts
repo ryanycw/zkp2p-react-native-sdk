@@ -12,7 +12,7 @@ import type {
   SignalIntentParams,
   CreateDepositParams,
   SignalIntentResponse,
-  QuoteMaxTokenForFiatRequest,
+  QuoteRequest,
   QuoteResponse,
   GetPayeeDetailsRequest,
   GetPayeeDetailsResponse,
@@ -194,9 +194,12 @@ export class Zkp2pClient {
   }
 
   /**
-   * Retrieve a token quote for a given fiat amount.
+   * Retrieve token quotes for a given amount.
+   * @param params.amount - The amount to quote (fiat or token based on isExactFiat)
+   * @param params.isExactFiat - Whether amount is in fiat (default: true) or token
+   * @param params.quotesToReturn - Number of quotes to return from the API
    */
-  async getQuote(params: QuoteMaxTokenForFiatRequest): Promise<QuoteResponse> {
+  async getQuote(params: QuoteRequest): Promise<QuoteResponse> {
     return apiGetQuote(params, this.baseApiUrl);
   }
 
