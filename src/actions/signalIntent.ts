@@ -34,7 +34,7 @@ export async function signalIntent(
     };
     const apiResponse = await apiSignalIntent(apiRequest, apiKey, baseApiUrl);
     if (!apiResponse.success) {
-      throw new Error(apiResponse.message);
+      throw new Error(apiResponse.message || 'Failed to signal intent');
     }
 
     const intentData = apiResponse.responseObject.intentData;

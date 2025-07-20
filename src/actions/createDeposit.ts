@@ -23,7 +23,7 @@ export async function createDeposit(
   try {
     // Check allowance first
     if (!walletClient.account) {
-      throw new Error('Wallet account is required');
+      throw new Error('Wallet not connected');
     }
 
     const currentAllowance = (await publicClient.readContract({
@@ -52,9 +52,7 @@ export async function createDeposit(
     const apiResponses = await Promise.all(
       params.processorNames.map((processorName, index) => {
         if (!params.depositData[index]) {
-          throw new Error(
-            'depositData must have the same length as processorNames'
-          );
+          throw new Error('Invalid deposit data');
         }
         return apiPostDepositDetails(
           {
@@ -67,9 +65,9 @@ export async function createDeposit(
       })
     );
     if (!apiResponses.every((response) => response.success)) {
+      const failedResponse = apiResponses.find((response) => !response.success);
       throw new Error(
-        apiResponses.find((response) => !response.success)?.message ||
-          'Failed to create deposit details'
+        failedResponse?.message || 'Failed to create deposit details'
       );
     }
 
@@ -83,7 +81,7 @@ export async function createDeposit(
           processorName as keyof (typeof DEPLOYED_ADDRESSES)[number]
         ]
       ) {
-        throw new Error(`Processor name ${processorName} not found`);
+        throw new Error('Invalid processor');
       }
       return DEPLOYED_ADDRESSES?.[chainId]?.[
         processorName as keyof (typeof DEPLOYED_ADDRESSES)[number]
@@ -94,7 +92,7 @@ export async function createDeposit(
       (depositData, index) => {
         const processorName = params.processorNames[index];
         if (!processorName) {
-          throw new Error('processorName is required for each deposit data');
+          throw new Error('Missing processor');
         }
         return {
           depositData: depositData || {},
@@ -125,7 +123,7 @@ export async function createDeposit(
         const currencyCodeHash =
           currencyInfo[conversionRate.currency]?.currencyCodeHash;
         if (!currencyCodeHash) {
-          throw new Error(`Currency ${conversionRate.currency} not found`);
+          throw new Error('Invalid currency');
         }
         return [
           {

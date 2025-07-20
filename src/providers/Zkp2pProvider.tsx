@@ -262,7 +262,12 @@ const Zkp2pProvider = ({
   const _fetchProviderConfig = useCallback(
     async (platform: string, actionType: string) => {
       const res = await fetch(`${configBaseUrl}${platform}/${actionType}.json`);
-      if (!res.ok) throw new Error(`Provider config HTTP ${res.status}`);
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(
+          `Failed to load provider config: ${res.status} ${errorText || res.statusText}`
+        );
+      }
       return (await res.json()) as ProviderSettings;
     },
     [configBaseUrl]
@@ -329,7 +334,10 @@ const Zkp2pProvider = ({
       }
       const res = await fetch(payload.request.url, replayOpts);
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok)
+        throw new Error(
+          `Session restore failed: ${res.status} ${res.statusText}`
+        );
       const body = await res.json();
 
       setInterceptedPayload(payload);
@@ -403,7 +411,7 @@ const Zkp2pProvider = ({
           const resp = await fetch(cfg.url, replayOpts);
           if (!resp.ok)
             throw new Error(
-              `Fallback replay HTTP ${resp.status} for ${cfg.url}`
+              `Failed to fetch transaction data: ${resp.status} ${resp.statusText}`
             );
           jsonBody = await resp.json();
           console.log(
@@ -420,9 +428,7 @@ const Zkp2pProvider = ({
           txs.length === 0 &&
           cfg.metadata.transactionsExtraction?.transactionJsonPathListSelector
         ) {
-          itemExtractionError = new Error(
-            'Authentication successful, but no transactions found where items were expected.'
-          );
+          itemExtractionError = new Error('No transactions found');
         }
 
         // Close webview and update state
@@ -758,7 +764,7 @@ const Zkp2pProvider = ({
       req: RPCCreateClaimOptions,
       onStep?: (msg: RPCResponse) => void
     ): Promise<RPCResponse> => {
-      if (!rpcWebViewRef.current) throw new Error('RPC WebView not ready');
+      if (!rpcWebViewRef.current) throw new Error('RPC not ready');
 
       const id = Math.random().toString(16).slice(2);
       const msg: WindowRPCIncomingMsg = {
@@ -778,18 +784,14 @@ const Zkp2pProvider = ({
             request: req,
           });
           delete pending.current[id];
-          reject(
-            new Error(
-              `RPC timeout after ${rpcTimeout / 1000}s. The witness server may be unresponsive or the proof generation is taking too long.`
-            )
-          );
+          reject(new Error('Proof generation timeout'));
         }, rpcTimeout);
 
         pending.current[id] = { resolve, reject, timeout, onStep };
       });
 
       if (!rpcWebViewRef.current) {
-        throw new Error('RPC WebView ref is null');
+        throw new Error('RPC not initialized');
       }
       rpcWebViewRef.current.injectJavaScript(`
         window.postMessage(${JSON.stringify(msg)});
@@ -860,7 +862,7 @@ const Zkp2pProvider = ({
       intentHash: string,
       itemIndex: number = 0
     ) => {
-      if (!payload) throw new Error('No intercepted payload available');
+      if (!payload) throw new Error('No authentication data');
       if (prover !== 'reclaim_snarkjs' && prover !== 'reclaim_gnark') {
         throw new Error(`Unsupported prover: ${prover}`);
       }
@@ -1083,7 +1085,7 @@ const Zkp2pProvider = ({
       intentHash: string,
       itemIndex: number = 0
     ) => {
-      if (!payload) throw new Error('No intercepted payload available');
+      if (!payload) throw new Error('No authentication data');
       if (prover !== 'reclaim_snarkjs' && prover !== 'reclaim_gnark') {
         throw new Error(`Unsupported prover: ${prover}`);
       }
@@ -1196,17 +1198,13 @@ const Zkp2pProvider = ({
       // Validate we have items to generate proof for
       const targetIndex = options.itemIndex ?? 0;
       if (!items || items.length === 0) {
-        const error = new Error(
-          'No transactions available for automatic proof generation'
-        );
+        const error = new Error('No transactions found');
         options.onProofError?.(error);
         return null;
       }
 
       if (targetIndex >= items.length) {
-        const error = new Error(
-          `Item index ${targetIndex} out of range (${items.length} items available)`
-        );
+        const error = new Error('Invalid transaction index');
         options.onProofError?.(error);
         return null;
       }
@@ -1299,9 +1297,7 @@ const Zkp2pProvider = ({
   const authenticate = useCallback(
     async (autoGenerateProof?: AutoGenerateProofOptions) => {
       if (!provider) {
-        throw new Error(
-          'No provider configuration available. Call initiate first.'
-        );
+        throw new Error('Provider not initialized');
       }
 
       // Only update auto-generation options if explicitly provided
@@ -1441,6 +1437,7 @@ const Zkp2pProvider = ({
         provider,
         flowState,
         authError,
+        proofError,
         metadataList,
         interceptedPayload,
         initiate,

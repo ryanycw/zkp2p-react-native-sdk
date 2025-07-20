@@ -25,7 +25,7 @@ import {
   formatEther,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { base } from 'viem/chains';
+import { baseSepolia } from 'viem/chains';
 
 function AppContent({
   walletClient,
@@ -70,8 +70,8 @@ function AppContent({
       if (walletClient?.account?.address && zkp2pClient) {
         try {
           const publicClient = createPublicClient({
-            chain: base,
-            transport: http('https://mainnet.base.org'),
+            chain: baseSepolia,
+            transport: http('https://sepolia.base.org'),
           });
 
           // Fetch ETH balance
@@ -222,8 +222,8 @@ export default function App() {
       const account = privateKeyToAccount(privateKey as `0x${string}`);
       const client = createWalletClient({
         account,
-        chain: base,
-        transport: http('https://mainnet.base.org'),
+        chain: baseSepolia,
+        transport: http('https://sepolia.base.org'),
       });
 
       setWalletClient(client);
@@ -289,9 +289,14 @@ export default function App() {
   return (
     <Zkp2pProvider
       walletClient={walletClient}
-      apiKey={walletClient ? ZKP2P_API_KEY : undefined}
-      chainId={8453}
+      apiKey={
+        walletClient
+          ? ZKP2P_API_KEY
+          : 'zkp2p_2DKskhzhCnyoL9qPkgeQL4qfTvt7QHMcatyHYjaRkfomWpOTU5DNk2X79ELvhYhy0qMlcKWYwyPFtcz5bhRZ3M5tVRCA93VdpHhjMWHc25l98rwuGCWU9yffqU'
+      }
+      chainId={84532}
       witnessUrl="https://witness-proxy-dev.zkp2p.xyz"
+      baseApiUrl="https://api-staging-testnet.zkp2p.xyz/v1"
       rpcTimeout={60000}
       prover="reclaim_gnark"
     >

@@ -14,6 +14,7 @@ export interface Zkp2pValues {
   provider: ProviderSettings | null;
   flowState: FlowState;
   authError: Error | null;
+  proofError: Error | null;
   metadataList: ExtractedMetadataList[];
   interceptedPayload: NetworkEvent | null;
   initiate?: (
@@ -38,6 +39,7 @@ const Zkp2pContext = React.createContext<Zkp2pValues>({
   provider: null,
   flowState: 'idle',
   authError: null,
+  proofError: null,
   metadataList: [],
   interceptedPayload: null,
   authWebViewProps: null,

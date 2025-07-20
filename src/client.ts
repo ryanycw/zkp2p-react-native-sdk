@@ -1,6 +1,6 @@
 import type { Address, Hash, PublicClient, WalletClient, Chain } from 'viem';
 import { createPublicClient, http } from 'viem';
-import { base, hardhat, scroll } from 'viem/chains';
+import { base, baseSepolia, hardhat, scroll } from 'viem/chains';
 import {
   DEPLOYED_ADDRESSES,
   DEFAULT_BASE_API_URL,
@@ -71,7 +71,7 @@ export class Zkp2pClient {
     const contractAddresses = DEPLOYED_ADDRESSES[this.chainId];
     if (!contractAddresses)
       throw new Error(
-        `Unsupported chainId ${opts.chainId} for ZKP2P contracts.`
+        `Unsupported chain ID: ${opts.chainId}. Supported chains are: 8453 (Base), 84532 (Base Sepolia), 31337 (Hardhat), 534351 (Scroll)`
       );
 
     this.addresses = {
@@ -92,16 +92,14 @@ export class Zkp2pClient {
       [base.id]: base,
       [hardhat.id]: hardhat,
       [scroll.id]: scroll,
+      [baseSepolia.id]: baseSepolia,
     };
 
     // Check if the chain is supported
     const selectedChainObject = supportedChains[this.chainId];
 
     if (!selectedChainObject) {
-      throw new Error(
-        `Zkp2pClient: Chain ID ${this.chainId} is not supported. ` +
-          `Supported chains are: Base (${base.id}), Hardhat (${hardhat.id}), and Scroll (${scroll.id}).`
-      );
+      throw new Error(`Chain ID ${this.chainId} is not supported`);
     }
 
     // Use the pre-configured chain, with optional RPC URL override
@@ -217,7 +215,7 @@ export class Zkp2pClient {
     ownerAddress: Address
   ): Promise<EscrowDepositView[]> {
     if (!this.publicClient) {
-      throw new Error('Public client is not initialized.');
+      throw new Error('Public client is not initialized');
     }
     try {
       const rawDepositViews = await this.publicClient.readContract({
@@ -244,7 +242,7 @@ export class Zkp2pClient {
     ownerAddress: Address
   ): Promise<EscrowIntentView | null> {
     if (!this.publicClient) {
-      throw new Error('Public client is not initialized.');
+      throw new Error('Public client is not initialized');
     }
     try {
       const rawIntentViews = await this.publicClient.readContract({
