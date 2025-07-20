@@ -40,6 +40,11 @@ interface CombinedScreenProps {
   authError: Error | null;
   zkp2pProviderConfig: ProviderSettings | null;
   interceptedPayload: NetworkEvent | null;
+  initiate?: (
+    platform: string,
+    actionType: string,
+    options?: any
+  ) => Promise<ProviderSettings>;
 }
 
 export const ProofScreen: React.FC<CombinedScreenProps> = ({
@@ -51,6 +56,7 @@ export const ProofScreen: React.FC<CombinedScreenProps> = ({
   authError,
   zkp2pProviderConfig,
   interceptedPayload,
+  initiate,
 }) => {
   const [selectedItemForProof, setSelectedItemForProof] =
     useState<ExtractedMetadataList | null>(null);
@@ -182,6 +188,34 @@ export const ProofScreen: React.FC<CombinedScreenProps> = ({
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Transactions & Proof</Text>
+        {initiate && zkp2pProviderConfig && (
+          <TouchableOpacity
+            onPress={async () => {
+              // Re-authenticate with the same provider config
+              // Using platform and actionType from the provider config
+              const platform = zkp2pProviderConfig.metadata.platform;
+              const actionType = zkp2pProviderConfig.actionType;
+              try {
+                await initiate(platform, actionType, {
+                  existingProviderConfig: zkp2pProviderConfig,
+                  skipAction: true, // Skip the action step, go directly to auth
+                });
+              } catch (error) {
+                console.error('[ProofScreen] Refresh failed:', error);
+              }
+            }}
+            style={styles.refreshButton}
+            disabled={
+              flowState === 'authenticating' || flowState === 'actionStarted'
+            }
+          >
+            {flowState === 'authenticating' || flowState === 'actionStarted' ? (
+              <ActivityIndicator size="small" color="#007AFF" />
+            ) : (
+              <Text style={styles.refreshButtonText}>↻</Text>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       <FlatList
@@ -381,10 +415,18 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     flex: 1,
-    marginLeft: -30,
   },
   backButton: { padding: 10, zIndex: 1 },
   backButtonText: { color: '#007AFF', fontSize: 17 },
+  refreshButton: {
+    padding: 10,
+    zIndex: 1,
+  },
+  refreshButtonText: {
+    color: '#007AFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
 
   listContentContainer: { paddingHorizontal: 10, paddingBottom: 10 },
   listTitle: {

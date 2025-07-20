@@ -183,6 +183,7 @@ function AppContent({
           authError={authError}
           zkp2pProviderConfig={zkp2pProviderConfig}
           interceptedPayload={interceptedPayload}
+          initiate={initiate}
         />
       ) : (
         <View style={styles.center}>
