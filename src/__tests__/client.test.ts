@@ -24,7 +24,7 @@ describe('Zkp2pClient', () => {
           chainId: 99999,
           prover: 'reclaim_snarkjs',
         })
-    ).toThrow('Unsupported chainId 99999 for ZKP2P contracts.');
+    ).toThrow('Unsupported chain ID: 99999');
   });
 
   it('uses custom rpcUrl when provided', () => {

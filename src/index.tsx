@@ -6,6 +6,17 @@ export { Zkp2pClient } from './client';
 export { DEPLOYED_ADDRESSES } from './utils/constants';
 export { currencyInfo } from './utils/currency';
 
+// Error handling exports
+export {
+  ZKP2PError,
+  NetworkError,
+  APIError,
+  ContractError,
+  ValidationError,
+  ProofGenerationError,
+  ErrorCode,
+} from './errors';
+
 export type {
   ExtractedMetadataList,
   NetworkEvent,

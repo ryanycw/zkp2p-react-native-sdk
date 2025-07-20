@@ -1,5 +1,6 @@
 import { NativeEventEmitter } from 'react-native';
 import type { Spec as GnarkModuleSpec } from '../NativeZkp2pGnarkModule';
+import { ProofGenerationError, ValidationError } from '../errors';
 
 export interface GnarkProofResult {
   proof: string;
@@ -18,8 +19,9 @@ export class GnarkBridge {
 
   constructor(nativeModule: GnarkModuleSpec) {
     if (!nativeModule) {
-      throw new Error(
-        '[GnarkBridge] Native module not provided. Make sure the native module is available.'
+      throw new ValidationError(
+        'Gnark native module not available. Please ensure the app is properly built and linked.',
+        'nativeModule'
       );
     }
 
@@ -64,7 +66,12 @@ export class GnarkBridge {
         this.activeRequestIds.delete(requestId);
 
         if (error) {
-          reject(new Error(error.message || 'Proof generation failed'));
+          reject(
+            new ProofGenerationError(
+              error.message || 'Proof generation failed',
+              { algorithm, requestId }
+            )
+          );
         } else {
           if (!response || !response.proof || !response.publicSignals) {
             console.error(
@@ -72,8 +79,9 @@ export class GnarkBridge {
               response
             );
             reject(
-              new Error(
-                'Invalid proof response: missing proof or publicSignals'
+              new ProofGenerationError(
+                'Invalid proof response: missing proof or publicSignals',
+                { response, requestId }
               )
             );
           } else {
@@ -95,7 +103,12 @@ export class GnarkBridge {
           console.error('[GnarkBridge] Native module error:', err);
           this.responseListeners.delete(requestId);
           this.activeRequestIds.delete(requestId);
-          reject(err);
+          reject(
+            new ProofGenerationError(
+              `Failed to start proof generation: ${err.message}`,
+              { algorithm, requestId, originalError: err }
+            )
+          );
         });
     });
   }
@@ -119,7 +132,10 @@ export class GnarkBridge {
       await (this.nativeModule as any).cancelProofGeneration(requestId);
     } catch (err) {
       console.error('[GnarkBridge] Error cancelling proof generation:', err);
-      throw err;
+      throw new ProofGenerationError(
+        `Failed to cancel proof generation: ${(err as Error).message}`,
+        { requestId, originalError: err }
+      );
     }
   }
 
@@ -153,7 +169,10 @@ export class GnarkBridge {
       await (this.nativeModule as any).cleanupMemory();
     } catch (err) {
       console.error('[GnarkBridge] Error cleaning up memory:', err);
-      throw err;
+      throw new ProofGenerationError(
+        `Failed to clean up memory: ${(err as Error).message}`,
+        { originalError: err }
+      );
     }
   }
 

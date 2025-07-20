@@ -10,6 +10,8 @@ import { apiPostDepositDetails } from '../adapters/api';
 import { DEPLOYED_ADDRESSES } from '../utils/constants';
 import { ethers } from 'ethers';
 import { currencyInfo } from '../utils/currency';
+import { ValidationError, ZKP2PError, ContractError } from '../errors';
+import { parseContractError } from '../errors/utils';
 
 export async function createDeposit(
   walletClient: WalletClient,
@@ -81,7 +83,10 @@ export async function createDeposit(
           processorName as keyof (typeof DEPLOYED_ADDRESSES)[number]
         ]
       ) {
-        throw new Error('Invalid processor');
+        throw new ValidationError(
+          `Processor ${processorName} not supported on chain ${chainId}`,
+          'processorName'
+        );
       }
       return DEPLOYED_ADDRESSES?.[chainId]?.[
         processorName as keyof (typeof DEPLOYED_ADDRESSES)[number]
@@ -135,37 +140,57 @@ export async function createDeposit(
     );
 
     // Then, call the escrow contract
-    const { request } = await publicClient.simulateContract({
-      address: escrowAddress as `0x${string}`,
-      abi: ESCROW_ABI,
-      functionName: 'createDeposit',
-      args: [
-        params.token,
-        params.amount,
-        params.intentAmountRange,
-        verifierAddresses,
-        verifierData,
-        currencies,
-      ],
-      account: walletClient.account,
-    });
+    let hash: Hash;
+    try {
+      const { request } = await publicClient.simulateContract({
+        address: escrowAddress as `0x${string}`,
+        abi: ESCROW_ABI,
+        functionName: 'createDeposit',
+        args: [
+          params.token,
+          params.amount,
+          params.intentAmountRange,
+          verifierAddresses,
+          verifierData,
+          currencies,
+        ],
+        account: walletClient.account,
+      });
 
-    const hash = await walletClient.writeContract(request);
+      hash = await walletClient.writeContract(request);
+    } catch (contractError) {
+      throw parseContractError(contractError);
+    }
 
     if (params.onSuccess) {
       params.onSuccess({ hash });
     }
 
     if (params.onMined) {
-      await publicClient.waitForTransactionReceipt({ hash });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status === 'reverted') {
+        throw new ContractError('Transaction reverted', undefined, {
+          txHash: hash,
+          receipt,
+        });
+      }
       params.onMined({ hash });
     }
 
     return { depositDetails, hash };
   } catch (error) {
+    const zkp2pError =
+      error instanceof ZKP2PError
+        ? error
+        : new ZKP2PError(
+            (error as Error).message || 'Unknown error occurred',
+            undefined,
+            { originalError: error }
+          );
+
     if (params.onError) {
-      params.onError(error as Error);
+      params.onError(zkp2pError);
     }
-    throw error;
+    throw zkp2pError;
   }
 }

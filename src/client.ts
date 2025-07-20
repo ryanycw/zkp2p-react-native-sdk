@@ -6,6 +6,7 @@ import {
   DEFAULT_BASE_API_URL,
   DEFAULT_WITNESS_URL,
 } from './utils/constants';
+import { ValidationError } from './errors';
 import type {
   Zkp2pClientOptions,
   FulfillIntentParams,
@@ -69,10 +70,23 @@ export class Zkp2pClient {
     this.witnessUrl = opts.witnessUrl || DEFAULT_WITNESS_URL;
 
     const contractAddresses = DEPLOYED_ADDRESSES[this.chainId];
-    if (!contractAddresses)
-      throw new Error(
-        `Unsupported chain ID: ${opts.chainId}. Supported chains are: 8453 (Base), 84532 (Base Sepolia), 31337 (Hardhat), 534351 (Scroll)`
+    if (!contractAddresses) {
+      const supportedChainIds = Object.keys(DEPLOYED_ADDRESSES);
+      const supportedChainNames: Record<number, string> = {
+        8453: 'Base',
+        84532: 'Base Sepolia',
+        31337: 'Hardhat',
+        534351: 'Scroll',
+      };
+      const supportedList = supportedChainIds
+        .map((id) => `${id} (${supportedChainNames[Number(id)] || 'Unknown'})`)
+        .join(', ');
+
+      throw new ValidationError(
+        `Unsupported chain ID: ${opts.chainId}. Supported chains are: ${supportedList}`,
+        'chainId'
       );
+    }
 
     this.addresses = {
       escrow: contractAddresses.escrow,
@@ -99,7 +113,10 @@ export class Zkp2pClient {
     const selectedChainObject = supportedChains[this.chainId];
 
     if (!selectedChainObject) {
-      throw new Error(`Chain ID ${this.chainId} is not supported`);
+      throw new ValidationError(
+        `Chain ID ${this.chainId} is not configured properly. Please check the chain configuration.`,
+        'chainId'
+      );
     }
 
     // Use the pre-configured chain, with optional RPC URL override

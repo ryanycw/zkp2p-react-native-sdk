@@ -1242,6 +1242,11 @@ const Zkp2pProvider = ({
   // PUBLIC API METHODS
   // ==========================================================================
 
+  /*
+   * Initiates the authentication flow for a given platform and action type.
+   * @dev For action types where there is an action link, user will send payment via the webview itself
+   * and automatically transition to the authenticate step
+   */
   const initiate = useCallback(
     async (
       platform: string,
@@ -1294,6 +1299,11 @@ const Zkp2pProvider = ({
     ]
   );
 
+  /*
+   * Authenticates the payment
+   * @dev This is called if config is already loaded in initiate() and user makes a payment external to
+   * the app. When user navigates back to the app, we can call this function to authenticate the payment.
+   */
   const authenticate = useCallback(
     async (autoGenerateProof?: AutoGenerateProofOptions) => {
       if (!provider) {
@@ -1311,6 +1321,9 @@ const Zkp2pProvider = ({
     [provider, _authenticateInternal]
   );
 
+  /*
+   * Closes the auth webview
+   */
   const closeAuthWebView = () => {
     // Animate closing
     Animated.timing(openAnimation, {
@@ -1324,6 +1337,9 @@ const Zkp2pProvider = ({
     });
   };
 
+  /*
+   * Minimizes the auth webview
+   */
   const minimizeAuthWebView = () => {
     const toValue = isWebViewMinimized ? 0 : 1;
 

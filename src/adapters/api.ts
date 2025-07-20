@@ -8,6 +8,8 @@ import type {
   GetPayeeDetailsRequest,
   GetPayeeDetailsResponse,
 } from '../types';
+import { NetworkError, ValidationError } from '../errors';
+import { parseAPIError, withRetry } from '../errors/utils';
 
 function headers() {
   return { 'Content-Type': 'application/json' } as const;
@@ -22,16 +24,28 @@ export async function apiSignalIntent(
   apiKey: string,
   baseApiUrl: string
 ): Promise<SignalIntentResponse> {
-  const res = await fetch(`${baseApiUrl}/verify/intent`, {
-    method: 'POST',
-    headers: createHeadersWithApiKey(apiKey),
-    body: JSON.stringify(req),
+  return withRetry(async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${baseApiUrl}/verify/intent`, {
+        method: 'POST',
+        headers: createHeadersWithApiKey(apiKey),
+        body: JSON.stringify(req),
+      });
+    } catch (error) {
+      throw new NetworkError('Failed to connect to API server', {
+        endpoint: '/verify/intent',
+        error,
+      });
+    }
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseAPIError(res, errorText);
+    }
+
+    return res.json();
   });
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Failed to signal intent: ${errorText}`);
-  }
-  return res.json();
 }
 
 export async function apiPostDepositDetails(
@@ -39,16 +53,28 @@ export async function apiPostDepositDetails(
   apiKey: string,
   baseApiUrl: string
 ): Promise<PostDepositDetailsResponse> {
-  const res = await fetch(`${baseApiUrl}/makers/create`, {
-    method: 'POST',
-    headers: createHeadersWithApiKey(apiKey),
-    body: JSON.stringify(req),
+  return withRetry(async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${baseApiUrl}/makers/create`, {
+        method: 'POST',
+        headers: createHeadersWithApiKey(apiKey),
+        body: JSON.stringify(req),
+      });
+    } catch (error) {
+      throw new NetworkError('Failed to connect to API server', {
+        endpoint: '/makers/create',
+        error,
+      });
+    }
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseAPIError(res, errorText);
+    }
+
+    return res.json();
   });
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Failed to create deposit details: ${errorText}`);
-  }
-  return res.json();
 }
 
 export async function apiGetQuote(
@@ -58,7 +84,10 @@ export async function apiGetQuote(
   // Validate quotesToReturn if provided
   if (req.quotesToReturn !== undefined) {
     if (!Number.isInteger(req.quotesToReturn) || req.quotesToReturn < 1) {
-      throw new Error('quotesToReturn must be a positive integer');
+      throw new ValidationError(
+        'quotesToReturn must be a positive integer',
+        'quotesToReturn'
+      );
     }
   }
 
@@ -91,20 +120,28 @@ export async function apiGetQuote(
     }
   });
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify(requestBody),
+  return withRetry(async () => {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify(requestBody),
+      });
+    } catch (error) {
+      throw new NetworkError('Failed to connect to API server', {
+        endpoint: `/quote/${endpoint}`,
+        error,
+      });
+    }
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseAPIError(res, errorText);
+    }
+
+    return res.json();
   });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Failed to get quote: ${errorText}`);
-  }
-
-  const response: QuoteResponse = await res.json();
-
-  return response;
 }
 
 export async function apiGetPayeeDetails(
@@ -112,16 +149,27 @@ export async function apiGetPayeeDetails(
   apiKey: string,
   baseApiUrl: string
 ): Promise<GetPayeeDetailsResponse> {
-  const res = await fetch(
-    `${baseApiUrl}/makers/${req.platform}/${req.hashedOnchainId}`,
-    {
-      method: 'GET',
-      headers: createHeadersWithApiKey(apiKey),
+  return withRetry(async () => {
+    let res: Response;
+    const endpoint = `/makers/${req.platform}/${req.hashedOnchainId}`;
+
+    try {
+      res = await fetch(`${baseApiUrl}${endpoint}`, {
+        method: 'GET',
+        headers: createHeadersWithApiKey(apiKey),
+      });
+    } catch (error) {
+      throw new NetworkError('Failed to connect to API server', {
+        endpoint,
+        error,
+      });
     }
-  );
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Failed to get payee details: ${errorText}`);
-  }
-  return res.json();
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseAPIError(res, errorText);
+    }
+
+    return res.json();
+  });
 }
