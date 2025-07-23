@@ -59,7 +59,7 @@ export type TxCallbackParams = {
 export type ActionCallback = (params: TxCallbackParams) => void;
 
 export type FulfillIntentParams = {
-  paymentProof: ProofData;
+  paymentProofs: ProofData[];
   intentHash: Hash;
   paymentMethod?: number;
   onSuccess?: ActionCallback;

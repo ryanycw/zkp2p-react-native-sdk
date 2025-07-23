@@ -4,6 +4,8 @@ import type { FulfillIntentParams } from '../types';
 import {
   encodeProofAndPaymentMethodAsBytes,
   encodeProofAsBytes,
+  encodeTwoProofs,
+  type ReclaimProof,
 } from '../utils/reclaimProof';
 
 export async function fulfillIntent(
@@ -13,18 +15,24 @@ export async function fulfillIntent(
   params: FulfillIntentParams
 ): Promise<Hash> {
   try {
-    const proof = params.paymentProof.proof;
+    const proofs: ReclaimProof[] = params.paymentProofs.map((p) => p.proof);
 
     let proofBytes: `0x${string}`;
-    if (params.paymentMethod) {
-      proofBytes = encodeProofAndPaymentMethodAsBytes(
-        proof,
-        params.paymentMethod
-      ) as `0x${string}`;
+
+    if (proofs.length === 2) {
+      proofBytes = encodeTwoProofs(proofs[0]!, proofs[1]!) as `0x${string}`;
+    } else if (proofs.length === 1) {
+      proofBytes = encodeProofAsBytes(proofs[0]!) as `0x${string}`;
     } else {
-      proofBytes = encodeProofAsBytes(proof) as `0x${string}`;
+      throw new Error('Invalid number of proofs. Expected 1 or 2 proofs.');
     }
 
+    if (params.paymentMethod !== undefined) {
+      proofBytes = encodeProofAndPaymentMethodAsBytes(
+        proofBytes,
+        params.paymentMethod
+      ) as `0x${string}`;
+    }
     const { request } = await publicClient.simulateContract({
       address: escrowAddress as `0x${string}`,
       abi: ESCROW_ABI,

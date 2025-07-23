@@ -52,14 +52,18 @@ export const encodeProofAsBytes = (proof: ReclaimProof) => {
   return ethers.utils.defaultAbiCoder.encode([PROOF_ENCODING_STRING], [proof]);
 };
 
+export const encodeTwoProofs = (proof1: ReclaimProof, proof2: ReclaimProof) => {
+  return ethers.utils.defaultAbiCoder.encode(
+    [PROOF_ENCODING_STRING, PROOF_ENCODING_STRING],
+    [proof1, proof2]
+  );
+};
+
 export const encodeProofAndPaymentMethodAsBytes = (
-  proof: ReclaimProof,
+  proof: `0x${string}`,
   paymentMethod: number
 ) => {
-  return ethers.utils.defaultAbiCoder.encode(
-    [PROOF_ENCODING_STRING, 'uint8'],
-    [proof, paymentMethod]
-  );
+  return ethers.utils.solidityPack(['uint8', 'bytes'], [paymentMethod, proof]);
 };
 
 /**
