@@ -127,9 +127,9 @@ const provider = await initiate('venmo', 'transfer_venmo', {
   // Optional: Auto-start with payment action
   initialAction: {
     enabled: true,
-    urlVariables: {
-      recipientId: 'john-doe-123',
-      amount: '100.00'
+    paymentDetails: {
+      RECIPIENT_ID: 'john-doe-123',
+      AMOUNT: '100'
     }
   },
   // Optional: Auto-generate proof after authentication
@@ -250,7 +250,7 @@ function BuyCrypto() {
       await initiate('venmo', 'transfer_venmo', {
         initialAction: {
           enabled: true,
-          urlVariables: {
+          paymentDetails: {
             venmoUsername: 'crypto-seller',
             note: 'Cash',
             amount: '100.00'
@@ -467,8 +467,7 @@ interface InitiateOptions {
   existingProviderConfig?: ProviderSettings;
   initialAction?: {
     enabled?: boolean;
-    urlVariables?: Record<string, string>;
-    injectionValues?: Record<string, string>;
+    paymentDetails?: Record<string, string>; // Generic details for both URL and JS injection
   };
   autoGenerateProof?: {
     intentHash?: string;

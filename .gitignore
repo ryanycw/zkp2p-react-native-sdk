@@ -98,3 +98,6 @@ nitrogen/
 
 .env
 example/.env
+
+# CLAUDE.md
+*CLAUDE.md

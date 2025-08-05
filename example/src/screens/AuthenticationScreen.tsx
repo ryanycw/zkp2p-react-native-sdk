@@ -58,16 +58,16 @@ export const AuthenticationScreen: React.FC<Props> = ({
       if (!shouldSkipAction) {
         authOptions.initialAction = {};
 
-        // Add injectionValues for MercadoPago to enable auto-fill
+        // Add paymentDetails for MercadoPago to enable auto-fill
         if (platform === 'mercadopago') {
-          authOptions.initialAction.injectionValues = {
+          authOptions.initialAction.paymentDetails = {
             RECIPIENT_ID: '0720000791240000001234',
             AMOUNT: '100',
           };
         }
 
         if (platform === 'wise') {
-          authOptions.initialAction.injectionValues = {
+          authOptions.initialAction.paymentDetails = {
             RECIPIENT_ID: '@alexanders6341',
           };
         }

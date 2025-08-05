@@ -1,6 +1,6 @@
 {
   "name": "@zkp2p/zkp2p-react-native-sdk",
-  "version": "0.0.1-rc.24",
+  "version": "0.0.1-rc.25",
   "description": "React Native SDK for ZKP2P",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
@@ -168,7 +168,7 @@
   },
   "dependencies": {
     "@zkp2p/react-native-webview-intercept": "^0.4.0",
-    "@zkp2p/reclaim-witness-sdk": "^4.0.0-reclaim",
+    "@zkp2p/reclaim-witness-sdk": "^4.0.6-reclaim",
     "ethers": "^5.7.1",
     "fast-text-encoding": "^1.0.6",
     "jsonpath-plus": "^10.3.0",

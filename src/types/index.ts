@@ -10,8 +10,7 @@ export interface AuthWVOverrides
 // Define options interfaces to match Zkp2pContext.ts
 export interface InitialActionOptions {
   enabled?: boolean;
-  urlVariables?: Record<string, string>;
-  injectionValues?: Record<string, string>;
+  paymentDetails?: Record<string, string>; // Generic details for both URL and JS injection
 }
 
 export interface AutoGenerateProofOptions {

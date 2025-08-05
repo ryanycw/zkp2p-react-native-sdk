@@ -458,25 +458,10 @@ const Zkp2pProvider = ({
   );
 
   const _processInjectedScript = useCallback(
-    (
-      script: string | undefined,
-      values: Record<string, string>,
-      allowedParamNames?: string[]
-    ) => {
-      if (!script) return '';
-
-      // Replace placeholders in the script
+    (script: string, values: Record<string, string>) => {
       let processedScript = script;
 
-      // If allowedParamNames is provided, only process those parameters
-      const valuesToProcess = allowedParamNames
-        ? Object.entries(values).filter(([key]) =>
-            allowedParamNames.includes(key)
-          )
-        : Object.entries(values);
-
-      // Replace individual value placeholders
-      valuesToProcess.forEach(([key, value]) => {
+      Object.entries(values).forEach(([key, value]) => {
         // Escape the value for safe JavaScript string insertion
         const escapedValue = value
           .replace(/\\/g, '\\\\')
@@ -568,26 +553,22 @@ const Zkp2pProvider = ({
     ) => {
       setFlowState('actionStarted');
 
-      // Apply URL variable substitutions if provided
+      // Apply template substitutions to URL and injection script
       let effectiveActionUrl = actionUrl;
-      if (initialAction.urlVariables) {
-        Object.entries(initialAction.urlVariables).forEach(([key, value]) => {
-          effectiveActionUrl = effectiveActionUrl.replace(
-            new RegExp(`{{${key}}}`, 'g'),
-            value
-          );
-        });
-      }
+      const details = initialAction.paymentDetails || {};
 
-      // Process injected script with values
-      const injectedScript =
-        initialAction.injectionValues && cfg.mobile?.injectedJavaScript
-          ? _processInjectedScript(
-              cfg.mobile.injectedJavaScript,
-              initialAction.injectionValues,
-              cfg.mobile.injectedJavaScriptParamNames
-            )
-          : '';
+      // Replace templates in URL
+      Object.entries(details).forEach(([key, value]) => {
+        effectiveActionUrl = effectiveActionUrl.replace(
+          new RegExp(`{{${key}}}`, 'g'),
+          value
+        );
+      });
+
+      // Process injected script with same details
+      const injectedScript = cfg.mobile?.injectedJavaScript
+        ? _processInjectedScript(cfg.mobile.injectedJavaScript, details)
+        : '';
 
       console.log('[zkp2p] Action WebView injectedScript:', injectedScript);
 
@@ -653,16 +634,16 @@ const Zkp2pProvider = ({
     ) => {
       setFlowState('actionStarted');
 
-      // Apply URL variable substitutions if provided
+      // Apply template substitutions to URL
       let effectiveActionUrl = actionUrl;
-      if (initialAction.urlVariables) {
-        Object.entries(initialAction.urlVariables).forEach(([key, value]) => {
-          effectiveActionUrl = effectiveActionUrl.replace(
-            new RegExp(`{{${key}}}`, 'g'),
-            value
-          );
-        });
-      }
+      const details = initialAction.paymentDetails || {};
+
+      Object.entries(details).forEach(([key, value]) => {
+        effectiveActionUrl = effectiveActionUrl.replace(
+          new RegExp(`{{${key}}}`, 'g'),
+          value
+        );
+      });
 
       try {
         await Linking.openURL(effectiveActionUrl);
@@ -944,7 +925,6 @@ const Zkp2pProvider = ({
           secretParams: secret,
           ownerPrivateKey:
             '0x0123788edad59d7c013cdc85e4372f350f828e2cec62d9a2de4560e69aec7f89',
-          client: { url: witnessUrl },
           zkEngine: prover === 'reclaim_gnark' ? 'gnark' : 'snarkjs',
           zkOperatorMode: prover === 'reclaim_gnark' ? 'rpc' : 'default',
           zkProofConcurrency:
@@ -1164,7 +1144,6 @@ const Zkp2pProvider = ({
         secretParams: secret,
         ownerPrivateKey:
           '0x0123788edad59d7c013cdc85e4372f350f828e2cec62d9a2de4560e69aec7f89',
-        client: { url: witnessUrl },
         zkEngine: prover === 'reclaim_gnark' ? 'gnark' : 'snarkjs',
         zkOperatorMode: prover === 'reclaim_gnark' ? 'rpc' : 'default',
         zkProofConcurrency:
@@ -1185,7 +1164,7 @@ const Zkp2pProvider = ({
 
       return res;
     },
-    [_rpcRequest, witnessUrl, prover]
+    [_rpcRequest, prover]
   );
 
   const _handleAutoGenerateProof = useCallback(
