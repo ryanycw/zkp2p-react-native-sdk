@@ -11,6 +11,9 @@ export interface AuthWVOverrides
 export interface InitialActionOptions {
   enabled?: boolean;
   paymentDetails?: Record<string, string>; // Generic details for both URL and JS injection
+  // Runtime override for internal vs external action preference.
+  // If provided, this overrides the provider config's mobile.useExternalAction.
+  useExternalActionOverride?: boolean;
 }
 
 export interface AutoGenerateProofOptions {
@@ -320,17 +323,22 @@ export interface ProviderSettings {
   additionalProofs?: AdditionalProof[];
   mobile?: {
     includeAdditionalCookieDomains: string[];
-    actionLink: string;
-    actionCompletedUrlRegex: string;
-    isExternalLink?: boolean;
-    appStoreLink?: string;
-    playStoreLink?: string;
+    useExternalAction?: boolean; // prefer external action when true; otherwise prefer internal
     userAgent?: {
       android: string;
       ios: string;
     };
-    injectedJavaScript?: string;
-    injectedJavaScriptParamNames?: string[];
+    internal?: {
+      actionLink: string;
+      actionCompletedUrlRegex?: string;
+      injectedJavaScript?: string;
+      injectedJavaScriptParamNames?: string[];
+    };
+    external?: {
+      actionLink: string;
+      appStoreLink?: string;
+      playStoreLink?: string;
+    };
   };
 }
 

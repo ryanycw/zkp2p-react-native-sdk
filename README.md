@@ -390,6 +390,12 @@ The SDK includes native gnark proving for optimal performance. Circuit files are
 - Automatic memory cleanup after proof generation
 - Proof cancellation support for better user experience
 
+### Native Bridge Methods
+- `executeZkFunction(requestId, functionName, args, algorithm)` — starts proving; emits `GnarkRPCResponse` with `response` or `error`.
+- `cancelProofGeneration(requestId)` — cancels an in-flight proof by ID.
+- `cleanupMemory()` — cancels all active tasks and frees resources.
+- Event: `GnarkRPCResponse` — payload includes `id`, `type` (`response`|`error`), and `response` or `error`.
+
 ## UI Components
 
 ### Authentication WebView
@@ -468,6 +474,7 @@ interface InitiateOptions {
   initialAction?: {
     enabled?: boolean;
     paymentDetails?: Record<string, string>; // Generic details for both URL and JS injection
+    useExternalActionOverride?: boolean; // Runtime override for internal vs external action preference
   };
   autoGenerateProof?: {
     intentHash?: string;

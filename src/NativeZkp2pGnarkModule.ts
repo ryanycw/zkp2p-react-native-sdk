@@ -8,4 +8,8 @@ export interface Spec {
 
   addListener(eventName: string): void;
   removeListeners(count: number): void;
+
+  // Platform implementations exist on both Android (Kotlin) and iOS (ObjC++)
+  cancelProofGeneration(requestId: string): Promise<any>;
+  cleanupMemory(): Promise<any>;
 }

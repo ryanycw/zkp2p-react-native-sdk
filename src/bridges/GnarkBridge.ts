@@ -60,7 +60,6 @@ export class GnarkBridge {
 
     return new Promise((resolve, reject) => {
       this.activeRequestIds.add(requestId);
-
       this.responseListeners.set(requestId, ({ response, error }) => {
         console.log('[GnarkBridge] Received response for:', requestId);
         this.activeRequestIds.delete(requestId);
@@ -183,6 +182,27 @@ export class GnarkBridge {
   getCurrentRequestId(): string | null {
     const activeIds = Array.from(this.activeRequestIds);
     return activeIds.length > 0 ? activeIds[activeIds.length - 1]! : null;
+  }
+
+  /**
+   * Get number of active gnark requests
+   */
+  getActiveCount(): number {
+    return this.activeRequestIds.size;
+  }
+
+  /**
+   * Wait until there are no active gnark requests, or timeout
+   * @param timeoutMs max time to wait
+   */
+  async waitForIdle(timeoutMs = 5000): Promise<void> {
+    const start = Date.now();
+    while (this.getActiveCount() > 0) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error('Timed out waiting for gnark to become idle');
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
 
   dispose(): void {

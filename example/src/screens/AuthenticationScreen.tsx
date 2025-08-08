@@ -68,8 +68,9 @@ export const AuthenticationScreen: React.FC<Props> = ({
 
         if (platform === 'wise') {
           authOptions.initialAction.paymentDetails = {
-            RECIPIENT_ID: '@alexanders6341',
+            RECIPIENT_ID: 'alexanders6341',
           };
+          authOptions.initialAction.useExternalActionOverride = true;
         }
       }
 

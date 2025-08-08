@@ -133,9 +133,14 @@ const calculateGnarkDynamicConcurrency = async (): Promise<number> => {
       1,
       Math.min(suggestedConcurrency, maxConcurrency)
     );
-    console.log(
-      `[zkp2p] Dynamic concurrency: ${finalConcurrency} (total: ${(totalMemory / 1024 / 1024).toFixed(0)}MB, available: ${(availableMemory / 1024 / 1024).toFixed(0)}MB)`
-    );
+
+    // Simulator/dev guardrail: clamp when running on emulator
+    try {
+      const isEmulator = await DeviceInfo.isEmulator();
+      if (isEmulator) {
+        return 2;
+      }
+    } catch {}
     return finalConcurrency;
   } catch (error) {
     console.log(
@@ -189,6 +194,22 @@ const Zkp2pProvider = ({
 
   const rpcWebViewRef = useRef<WebView>(null);
   const pending = useRef<Record<string, PendingEntry>>({});
+
+  // Abort all outstanding RPC promises and clear their timers
+  const abortAllPending = useCallback((reason: string): number => {
+    let count = 0;
+    try {
+      Object.entries(pending.current).forEach(([id, ent]) => {
+        try {
+          if (ent.timeout) clearTimeout(ent.timeout as any);
+          ent.reject(new Error(reason));
+          delete pending.current[id];
+          count++;
+        } catch {}
+      });
+    } catch {}
+    return count;
+  }, []);
   const spinAnimation = useRef(new Animated.Value(0)).current;
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const openAnimation = useRef(new Animated.Value(1)).current;
@@ -566,8 +587,11 @@ const Zkp2pProvider = ({
       });
 
       // Process injected script with same details
-      const injectedScript = cfg.mobile?.injectedJavaScript
-        ? _processInjectedScript(cfg.mobile.injectedJavaScript, details)
+      const injectedScript = cfg.mobile?.internal?.injectedJavaScript
+        ? _processInjectedScript(
+            cfg.mobile.internal.injectedJavaScript,
+            details
+          )
         : '';
 
       console.log('[zkp2p] Action WebView injectedScript:', injectedScript);
@@ -588,8 +612,10 @@ const Zkp2pProvider = ({
         onNavigationStateChange: async (navState) => {
           // Check if the current URL matches the target URL pattern
           if (
-            cfg.mobile?.actionCompletedUrlRegex &&
-            new RegExp(cfg.mobile?.actionCompletedUrlRegex).test(navState.url)
+            cfg.mobile?.internal?.actionCompletedUrlRegex &&
+            new RegExp(cfg.mobile.internal.actionCompletedUrlRegex).test(
+              navState.url
+            )
           ) {
             // Navigate to authentication phase
             await _authenticateInternal(cfg);
@@ -653,8 +679,8 @@ const Zkp2pProvider = ({
         // Check if app store links are available for fallback
         const appStoreLink =
           Platform.OS === 'ios'
-            ? cfg.mobile?.appStoreLink
-            : cfg.mobile?.playStoreLink;
+            ? cfg.mobile?.external?.appStoreLink
+            : cfg.mobile?.external?.playStoreLink;
 
         if (appStoreLink) {
           // Show alert asking user if they want to open the app store
@@ -716,21 +742,35 @@ const Zkp2pProvider = ({
       cfg: ProviderSettings,
       initialAction: NonNullable<InitiateOptions['initialAction']>
     ) => {
-      const effectiveActionUrl = cfg.mobile?.actionLink;
+      const internalUrl = cfg.mobile?.internal?.actionLink;
+      const externalUrl = cfg.mobile?.external?.actionLink;
 
-      if (!effectiveActionUrl) return;
-
-      const isExternalLink = cfg.mobile?.isExternalLink ?? false;
-
-      if (isExternalLink) {
-        await _handleExternalAction(effectiveActionUrl, cfg, initialAction);
-      } else {
-        await _handleHttpActionInWebView(
-          effectiveActionUrl,
-          cfg,
-          initialAction
-        );
+      // Choose flow: prioritize internal when available unless config set to external
+      let preferExternal = cfg.mobile?.useExternalAction === true;
+      // Runtime override (for dev/testing): initialAction.useExternalActionOverride takes precedence.
+      if (initialAction.useExternalActionOverride !== undefined) {
+        preferExternal = !!initialAction.useExternalActionOverride;
       }
+
+      const runInternal = async () => {
+        if (!internalUrl) return false;
+        await _handleHttpActionInWebView(internalUrl, cfg, initialAction);
+        return true;
+      };
+
+      const runExternal = async () => {
+        if (!externalUrl) return false;
+        await _handleExternalAction(externalUrl, cfg, initialAction);
+        return true;
+      };
+
+      let started = false;
+      if (preferExternal) {
+        started = (await runExternal()) || (await runInternal());
+      } else {
+        started = (await runInternal()) || (await runExternal());
+      }
+      if (!started) return; // nothing to do
     },
     [_handleHttpActionInWebView, _handleExternalAction]
   );
@@ -764,6 +804,13 @@ const Zkp2pProvider = ({
             rpcTimeout: rpcTimeout / 1000 + 's',
             request: req,
           });
+          // Best-effort native cleanup to avoid lingering tasks impacting next run
+          if (prover === 'reclaim_gnark' && gnarkBridge) {
+            gnarkBridge
+              .cancelAllProofs()
+              .then(() => gnarkBridge.cleanupMemory())
+              .catch(() => undefined);
+          }
           delete pending.current[id];
           reject(new Error('Proof generation timeout'));
         }, rpcTimeout);
@@ -779,7 +826,7 @@ const Zkp2pProvider = ({
       `);
       return promise;
     },
-    [rpcTimeout]
+    [rpcTimeout, prover, gnarkBridge]
   );
 
   const _onRpcMessage = useCallback((e: WebViewMessageEvent) => {
@@ -796,8 +843,9 @@ const Zkp2pProvider = ({
       const { id, type } = data as RPCResponse;
 
       if (type === 'createClaimStep') {
-        if (pending.current[id]?.onStep) {
-          pending.current[id].onStep(data as RPCResponse);
+        const entry = pending.current[id];
+        if (entry?.onStep) {
+          entry.onStep(data as RPCResponse);
         }
       } else if (type === 'createClaimDone') {
         pending.current[id]?.resolve(data as RPCResponse);
@@ -816,8 +864,9 @@ const Zkp2pProvider = ({
 
         (error as any).rawData = data;
 
-        pending.current[id]?.reject(error);
-        clearTimeout(pending.current[id]?.timeout);
+        const entry = pending.current[id];
+        entry?.reject(error);
+        if (entry?.timeout) clearTimeout(entry.timeout as any);
         delete pending.current[id];
       }
     } catch (error) {
@@ -854,6 +903,23 @@ const Zkp2pProvider = ({
       setProofError(null);
       setLastProofItemIndex(itemIndex);
       try {
+        // Preflight: ensure no native gnark tasks are lingering
+        if (gnarkBridge && prover === 'reclaim_gnark') {
+          try {
+            await gnarkBridge.cancelAllProofs();
+            await gnarkBridge.cleanupMemory();
+          } catch (e) {
+            console.warn('[zkp2p] Preflight cleanup warning:', e);
+          }
+        }
+
+        // Abort any outstanding RPC requests from a previous attempt
+        const aborted = abortAllPending('New proof started');
+        if (aborted > 0) {
+          console.log('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
+        }
+        // Keep preflight simple (no global abort/remount): rely on timeout guards
+
         let body = payload.response.body ?? '{}';
         if (providerCfg.metadata.preprocessRegex) {
           const m = body.match(
@@ -1054,7 +1120,15 @@ const Zkp2pProvider = ({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [_rpcRequest, witnessUrl, prover, setFlowState, setProofData, setRpcKey]
+    [
+      _rpcRequest,
+      witnessUrl,
+      prover,
+      setFlowState,
+      setProofData,
+      setRpcKey,
+      gnarkBridge,
+    ]
   );
 
   // Internal helper to generate a single proof without modifying state
@@ -1068,6 +1142,15 @@ const Zkp2pProvider = ({
       if (!payload) throw new Error('No authentication data');
       if (prover !== 'reclaim_snarkjs' && prover !== 'reclaim_gnark') {
         throw new Error(`Unsupported prover: ${prover}`);
+      }
+
+      // Ensure gnark is not busy between sequential proof calls
+      if (gnarkBridge && prover === 'reclaim_gnark') {
+        try {
+          await gnarkBridge.waitForIdle(2000);
+        } catch (e) {
+          console.warn('[zkp2p] waitForIdle before additional proof timed out');
+        }
       }
 
       let body = payload.response.body ?? '{}';
@@ -1164,7 +1247,7 @@ const Zkp2pProvider = ({
 
       return res;
     },
-    [_rpcRequest, prover]
+    [_rpcRequest, prover, gnarkBridge]
   );
 
   const _handleAutoGenerateProof = useCallback(
@@ -1255,7 +1338,11 @@ const Zkp2pProvider = ({
         (await _getOrFetchProviderConfig(platform, actionType, provider));
 
       // Handle action link if it exists and skipAction is not true
-      if (cfg.mobile?.actionLink && !options?.skipAction) {
+      const hasAnyActionLink =
+        (!!cfg.mobile?.internal?.actionLink ||
+          !!cfg.mobile?.external?.actionLink) &&
+        !options?.skipAction;
+      if (hasAnyActionLink) {
         // If no initialAction provided, create default options
         const actionOptions = initialAction || { enabled: true };
         await _handleInitialAction(cfg, actionOptions);
@@ -1414,12 +1501,9 @@ const Zkp2pProvider = ({
 
   useEffect(
     () => () => {
-      Object.values(pending.current).forEach(({ reject, timeout }) => {
-        clearTimeout(timeout);
-        reject(new Error('Component unmounted'));
-      });
+      abortAllPending('Component unmounted');
     },
-    []
+    [abortAllPending]
   );
 
   // ==========================================================================
@@ -1522,6 +1606,17 @@ const Zkp2pProvider = ({
                       console.error('[zkp2p] Error cleaning up memory:', err);
                     }
                   }
+
+                  // Abort any outstanding RPC promises and remount the RPC channel
+                  const aborted = abortAllPending('User cancelled');
+                  if (aborted > 0) {
+                    console.log(
+                      '[zkp2p] Aborted',
+                      aborted,
+                      'pending RPC request(s)'
+                    );
+                  }
+                  setRpcKey((k) => k + 1);
                 }}
               >
                 <Text style={styles.proofSpinnerExitText}>×</Text>

@@ -14,6 +14,7 @@ interface RPCWebViewProps {
 export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
   ({ onMessage, onLoad, onError, witnessUrl, gnarkBridge }, ref) => {
     const internalWebViewRef = useRef<WebView>(null);
+    // Allow parallel gnark requests as directed by concurrency settings
 
     useEffect(() => {
       if (ref) {
@@ -153,16 +154,16 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
                 // Send response as a STRING to match witness server expectations
                 const responseString = JSON.stringify(responseForServer);
                 internalWebViewRef.current?.injectJavaScript(`
-                  (function() {
-                    try {
-                      const responseStr = ${JSON.stringify(responseString)};
-                      console.log('[RPCWebView] Sending response string via postMessage');
-                      window.postMessage(responseStr, '*');
-                    } catch (err) {
-                      console.error('[RPCWebView] Error sending response:', err);
-                    }
-                  })();
-                `);
+                    (function() {
+                      try {
+                        const responseStr = ${JSON.stringify(responseString)};
+                        console.log('[RPCWebView] Sending response string via postMessage');
+                        window.postMessage(responseStr, '*');
+                      } catch (err) {
+                        console.error('[RPCWebView] Error sending response:', err);
+                      }
+                    })();
+                  `);
               } catch (stringifyError) {
                 console.error(
                   '[RPCWebView] JSON.stringify error:',
