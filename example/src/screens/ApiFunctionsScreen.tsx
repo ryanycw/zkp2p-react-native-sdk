@@ -143,13 +143,28 @@ export function ApiFunctionsScreen({
           max: BigInt(1000000),
         },
         conversionRates: [
-          {
-            currency: currencyInfo.USD?.currency as string,
-            conversionRate: '1000000000000000000',
-          },
+          [
+            {
+              currency: currencyInfo.USD?.currency as string,
+              conversionRate: '1000000000000000000',
+            },
+            {
+              currency: currencyInfo.EUR?.currency as string,
+              conversionRate: '900000000000000000',
+            },
+          ],
+          [
+            {
+              currency: currencyInfo.USD?.currency as string,
+              conversionRate: '1000000000000000000',
+            },
+          ],
         ],
-        processorNames: ['venmo'],
+        processorNames: ['revolut', 'venmo'],
         depositData: [
+          {
+            revolutUsername: 'davyjones',
+          },
           {
             venmoUsername: 'ethereum',
           },

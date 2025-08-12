@@ -5,11 +5,13 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import type {
   ProviderSettings,
   InitiateOptions as SDKInitiateOptions,
 } from '../../../src/';
+import { useZkp2p } from '../../../src/';
 
 interface Props {
   isAuthenticating: boolean;
@@ -28,6 +30,7 @@ export const AuthenticationScreen: React.FC<Props> = ({
 }) => {
   const [activePlatform, setActivePlatform] = useState<string | null>(null);
   const [autoProofEnabled, setAutoProofEnabled] = useState(false);
+  const { clearSession } = useZkp2p();
 
   const handleSelect = async (platform: string, action: string) => {
     setActivePlatform(platform);
@@ -70,7 +73,7 @@ export const AuthenticationScreen: React.FC<Props> = ({
           authOptions.initialAction.paymentDetails = {
             RECIPIENT_ID: 'alexanders6341',
           };
-          authOptions.initialAction.useExternalActionOverride = true;
+          authOptions.skipAction = true;
         }
       }
 
@@ -100,6 +103,21 @@ export const AuthenticationScreen: React.FC<Props> = ({
           </Text>
         </TouchableOpacity>
       </View>
+
+      <TouchableOpacity
+        style={[styles.button, styles.clearButton]}
+        onPress={async () => {
+          try {
+            await clearSession?.();
+            Alert.alert('Session Cleared', 'All cookies have been cleared.');
+          } catch (e) {
+            console.error('Failed to clear session', e);
+            Alert.alert('Error', 'Failed to clear cookies.');
+          }
+        }}
+      >
+        <Text style={styles.buttonText}>Clear Cookies (Force Login)</Text>
+      </TouchableOpacity>
 
       <TouchableOpacity
         style={[
@@ -278,6 +296,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     marginBottom: 16,
+  },
+  clearButton: {
+    backgroundColor: '#ff3b30',
   },
   disabled: { backgroundColor: '#9bb8ff' },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },

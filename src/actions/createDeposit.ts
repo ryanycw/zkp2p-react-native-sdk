@@ -9,7 +9,7 @@ import type {
 import { apiPostDepositDetails } from '../adapters/api';
 import { DEPLOYED_ADDRESSES } from '../utils/constants';
 import { ethers } from 'ethers';
-import { currencyInfo } from '../utils/currency';
+import { mapConversionRatesToOnchain } from '../utils/currency';
 import { ValidationError, ZKP2PError, ContractError } from '../errors';
 import { parseContractError } from '../errors/utils';
 
@@ -123,20 +123,9 @@ export async function createDeposit(
       }
     );
 
-    const currencies: Currency[][] = params.conversionRates.map(
-      (conversionRate) => {
-        const currencyCodeHash =
-          currencyInfo[conversionRate.currency]?.currencyCodeHash;
-        if (!currencyCodeHash) {
-          throw new Error('Invalid currency');
-        }
-        return [
-          {
-            code: currencyCodeHash as `0x${string}`,
-            conversionRate: BigInt(conversionRate.conversionRate),
-          },
-        ];
-      }
+    const currencies: Currency[][] = mapConversionRatesToOnchain(
+      params.conversionRates as any,
+      verifierAddresses.length
     );
 
     // Then, call the escrow contract

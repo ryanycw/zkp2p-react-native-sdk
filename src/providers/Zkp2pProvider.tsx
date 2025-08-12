@@ -54,11 +54,13 @@ import { Zkp2pClient } from '../client';
 import { BridgeFactory } from '../bridges/BridgeFactory';
 import type { GnarkBridge } from '../bridges/GnarkBridge';
 import { DEFAULT_USER_AGENT } from '../utils/constants';
+import { toDecimalString } from '../utils/format';
 import { parseReclaimProxyProof } from '../utils/reclaimProof';
 import { extractMetadata, safeStringify } from './utils';
 
 import { RPCWebView } from '../components/RPCWebView';
 import Zkp2pContext from './Zkp2pContext';
+import { clearSession as clearSessionService } from '../utils/session';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -194,22 +196,6 @@ const Zkp2pProvider = ({
 
   const rpcWebViewRef = useRef<WebView>(null);
   const pending = useRef<Record<string, PendingEntry>>({});
-
-  // Abort all outstanding RPC promises and clear their timers
-  const abortAllPending = useCallback((reason: string): number => {
-    let count = 0;
-    try {
-      Object.entries(pending.current).forEach(([id, ent]) => {
-        try {
-          if (ent.timeout) clearTimeout(ent.timeout as any);
-          ent.reject(new Error(reason));
-          delete pending.current[id];
-          count++;
-        } catch {}
-      });
-    } catch {}
-    return count;
-  }, []);
   const spinAnimation = useRef(new Animated.Value(0)).current;
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const openAnimation = useRef(new Animated.Value(1)).current;
@@ -885,6 +871,22 @@ const Zkp2pProvider = ({
   // PROOF GENERATION METHODS
   // ==========================================================================
 
+  // Abort all outstanding RPC promises and clear their timers
+  const abortAllPending = useCallback((reason: string): number => {
+    let count = 0;
+    try {
+      Object.entries(pending.current).forEach(([id, ent]) => {
+        try {
+          if (ent.timeout) clearTimeout(ent.timeout as any);
+          ent.reject(new Error(reason));
+          delete pending.current[id];
+          count++;
+        } catch {}
+      });
+    } catch {}
+    return count;
+  }, []);
+
   const generateProof = useCallback(
     async (
       providerCfg: ProviderSettings,
@@ -970,7 +972,7 @@ const Zkp2pProvider = ({
           name: 'http',
           context: JSON.stringify({
             contextAddress: '0x0',
-            contextMessage: intentHash,
+            contextMessage: toDecimalString(intentHash),
           }),
           params: {
             url: providerCfg.url,
@@ -1206,7 +1208,7 @@ const Zkp2pProvider = ({
         name: 'http',
         context: JSON.stringify({
           contextAddress: '0x0',
-          contextMessage: intentHash,
+          contextMessage: toDecimalString(intentHash),
         }),
         params: {
           url: providerCfg.url,
@@ -1272,9 +1274,7 @@ const Zkp2pProvider = ({
       }
 
       try {
-        const intentHash =
-          options.intentHash ||
-          '0x0000000000000000000000000000000000000000000000000000000000000001';
+        const intentHash = options.intentHash || '';
         const result = await generateProof(
           cfg,
           payload,
@@ -1418,6 +1418,16 @@ const Zkp2pProvider = ({
     setIsWebViewMinimized(!isWebViewMinimized);
   };
 
+  const clearSession = useCallback(
+    async (options?: {
+      clearInterceptedPayloads?: boolean;
+      iosAlsoClearWebKitStore?: boolean;
+    }) => {
+      await clearSessionService(options);
+    },
+    []
+  );
+
   // ==========================================================================
   // COMPUTED STYLES
   // ==========================================================================
@@ -1526,6 +1536,7 @@ const Zkp2pProvider = ({
         generateProof,
         proofData,
         zkp2pClient,
+        clearSession,
       }}
     >
       {children}
@@ -1624,10 +1635,10 @@ const Zkp2pProvider = ({
 
               <Text style={styles.proofSpinnerTitle}>
                 {flowState === 'proofGeneratedSuccess'
-                  ? 'Successfully Authenticated!'
+                  ? 'Successfully Verified!'
                   : flowState === 'proofGeneratedFailure'
-                    ? 'Authentication Failed'
-                    : 'Authenticating'}
+                    ? 'Verification Failed'
+                    : 'Verifying...'}
               </Text>
 
               <View style={styles.proofSpinnerWrapper}>
@@ -1691,7 +1702,7 @@ const Zkp2pProvider = ({
                 <>
                   <Text style={styles.proofSpinnerSubtitle}>
                     {proofError?.message ||
-                      'An error occurred while authenticating'}
+                      'An error occurred while verifying payment'}
                   </Text>
                   <TouchableOpacity
                     style={styles.retryButton}
@@ -1724,8 +1735,8 @@ const Zkp2pProvider = ({
                 <>
                   <Text style={styles.proofSpinnerSubtitle}>
                     {flowState === 'proofGeneratedSuccess'
-                      ? 'Authenticated!'
-                      : 'Authenticating...'}
+                      ? 'Payment Verified!'
+                      : 'Verifying Payment'}
                   </Text>
                 </>
               )}

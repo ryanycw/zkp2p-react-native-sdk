@@ -24,6 +24,10 @@ export interface Zkp2pValues {
   ) => Promise<ProviderSettings>;
   authenticate?: () => Promise<void>;
   authWebViewProps: React.ComponentProps<typeof InterceptWebView> | null;
+  clearSession?: (options?: {
+    clearInterceptedPayloads?: boolean;
+    iosAlsoClearWebKitStore?: boolean;
+  }) => Promise<void>;
   closeAuthWebView?: () => void;
   generateProof?: (
     providerCfg: ProviderSettings,
@@ -39,6 +43,7 @@ const Zkp2pContext = React.createContext<Zkp2pValues>({
   provider: null,
   flowState: 'idle',
   authError: null,
+  clearSession: undefined,
   proofError: null,
   metadataList: [],
   interceptedPayload: null,

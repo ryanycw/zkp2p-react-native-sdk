@@ -1,4 +1,5 @@
 import { currencyKeccak256 } from './keccak';
+import type { Currency as OnchainCurrency } from '../types/contract';
 
 export const Currency = {
   AED: 'AED',
@@ -273,3 +274,38 @@ export const currencyInfo: Record<CurrencyType, CurrencyData> = {
     countryCode: 'za',
   },
 };
+
+export type UICurrencyRate = { currency: CurrencyType; conversionRate: string };
+
+/**
+ * Maps UI-provided conversion rates into on-chain currency groups.
+ * - Ensures nested shape and validates group count when provided.
+ * - Converts rate strings to bigint and currency codes to hashed `0x..`.
+ */
+export function mapConversionRatesToOnchain(
+  groups: UICurrencyRate[][],
+  expectedGroups?: number
+): OnchainCurrency[][] {
+  if (!Array.isArray(groups) || !Array.isArray(groups[0])) {
+    throw new Error('conversionRates must be a nested array per processor');
+  }
+
+  if (typeof expectedGroups === 'number' && groups.length !== expectedGroups) {
+    throw new Error(
+      `conversionRates length (${groups.length}) must match processorNames length (${expectedGroups})`
+    );
+  }
+
+  return groups.map((group) =>
+    group.map((r) => {
+      const info = currencyInfo[r.currency as CurrencyType];
+      if (!info?.currencyCodeHash) {
+        throw new Error('Invalid currency');
+      }
+      return {
+        code: info.currencyCodeHash as `0x${string}`,
+        conversionRate: BigInt(r.conversionRate),
+      } as OnchainCurrency;
+    })
+  );
+}

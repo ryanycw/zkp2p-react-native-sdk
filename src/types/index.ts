@@ -102,11 +102,16 @@ export type SignalIntentParams = {
   onMined?: ActionCallback;
 };
 
+export type CreateDepositConversionRate = {
+  currency: CurrencyType;
+  conversionRate: string;
+};
+
 export type CreateDepositParams = {
   token: Address;
   amount: bigint;
   intentAmountRange: Range;
-  conversionRates: { currency: CurrencyType; conversionRate: string }[];
+  conversionRates: CreateDepositConversionRate[][];
   processorNames: string[];
   depositData: {
     [key: string]: string;

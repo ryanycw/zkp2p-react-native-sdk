@@ -4,3 +4,4 @@ export * from './reclaimProof';
 export * from './keccak';
 export * from './escrowViewParsers';
 export * from './contracts';
+export * from './format';
