@@ -347,7 +347,25 @@ const Zkp2pProvider = ({
         );
       const body = await res.json();
 
-      setInterceptedPayload(payload);
+      const refreshedHeaders: Record<string, string> = {};
+      try {
+        res.headers?.forEach?.((v, k) => {
+          refreshedHeaders[k] = v;
+        });
+      } catch {}
+      const updatedPayload: NetworkEvent = {
+        ...payload,
+        response: {
+          url: (res as any).url || payload.response.url,
+          status: res.status,
+          headers: Object.keys(refreshedHeaders).length
+            ? refreshedHeaders
+            : payload.response.headers,
+          body: JSON.stringify(body),
+        },
+      };
+
+      setInterceptedPayload(updatedPayload);
       setMetadataList(extractMetadata(body, cfg));
       setFlowState('authenticated');
       return true;
@@ -378,6 +396,7 @@ const Zkp2pProvider = ({
 
       let jsonBody: any;
       let itemExtractionError: Error | null = null;
+      let effectivePayload: NetworkEvent = evt;
 
       try {
         if (primaryHit) {
@@ -425,11 +444,32 @@ const Zkp2pProvider = ({
             `[zkp2p] Fallback replay response:`,
             JSON.stringify(jsonBody)
           );
+
+          // Always update the headers to the latest values
+          const refreshedHeaders: Record<string, string> = {};
+          try {
+            resp.headers?.forEach?.((v, k) => {
+              refreshedHeaders[k] = v;
+            });
+          } catch {}
+
+          const updatedEvt: NetworkEvent = {
+            ...evt,
+            response: {
+              url: (resp as any).url || evt.response.url,
+              status: resp.status,
+              headers: Object.keys(refreshedHeaders).length
+                ? refreshedHeaders
+                : evt.response.headers,
+              body: JSON.stringify(jsonBody),
+            },
+          };
+          effectivePayload = updatedEvt;
         }
 
         const txs = extractMetadata(jsonBody, cfg);
         setMetadataList(txs);
-        setInterceptedPayload(evt);
+        setInterceptedPayload(effectivePayload);
 
         if (
           txs.length === 0 &&
