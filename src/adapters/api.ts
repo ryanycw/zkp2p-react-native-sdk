@@ -7,6 +7,8 @@ import type {
   QuoteResponse,
   GetPayeeDetailsRequest,
   GetPayeeDetailsResponse,
+  ValidatePayeeDetailsRequest,
+  ValidatePayeeDetailsResponse,
 } from '../types';
 import { NetworkError, ValidationError } from '../errors';
 import { parseAPIError, withRetry } from '../errors/utils';
@@ -157,6 +159,37 @@ export async function apiGetPayeeDetails(
       res = await fetch(`${baseApiUrl}${endpoint}`, {
         method: 'GET',
         headers: createHeadersWithApiKey(apiKey),
+      });
+    } catch (error) {
+      throw new NetworkError('Failed to connect to API server', {
+        endpoint,
+        error,
+      });
+    }
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw parseAPIError(res, errorText);
+    }
+
+    return res.json();
+  });
+}
+
+export async function apiValidatePayeeDetails(
+  req: ValidatePayeeDetailsRequest,
+  apiKey: string,
+  baseApiUrl: string
+): Promise<ValidatePayeeDetailsResponse> {
+  return withRetry(async () => {
+    let res: Response;
+    const endpoint = '/makers/validate';
+
+    try {
+      res = await fetch(`${baseApiUrl}${endpoint}`, {
+        method: 'POST',
+        headers: createHeadersWithApiKey(apiKey),
+        body: JSON.stringify(req),
       });
     } catch (error) {
       throw new NetworkError('Failed to connect to API server', {

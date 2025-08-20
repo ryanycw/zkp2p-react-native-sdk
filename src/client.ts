@@ -17,6 +17,8 @@ import type {
   QuoteResponse,
   GetPayeeDetailsRequest,
   GetPayeeDetailsResponse,
+  ValidatePayeeDetailsRequest,
+  ValidatePayeeDetailsResponse,
   PostDepositDetailsRequest,
   WithdrawDepositParams,
   CancelIntentParams,
@@ -27,7 +29,11 @@ import type {
 import { fulfillIntent } from './actions/fulfillIntent';
 import { signalIntent } from './actions/signalIntent';
 import { createDeposit } from './actions/createDeposit';
-import { apiGetQuote, apiGetPayeeDetails } from './adapters/api';
+import {
+  apiGetQuote,
+  apiGetPayeeDetails,
+  apiValidatePayeeDetails,
+} from './adapters/api';
 import { withdrawDeposit } from './actions/withdrawDeposit';
 import { cancelIntent } from './actions/cancelIntent';
 import { releaseFundsToPayer } from './actions/releaseFundsToPayer';
@@ -223,6 +229,13 @@ export class Zkp2pClient {
     params: GetPayeeDetailsRequest
   ): Promise<GetPayeeDetailsResponse> {
     return apiGetPayeeDetails(params, this.apiKey, this.baseApiUrl);
+  }
+
+  /** Validate payee details via the API. */
+  async validatePayeeDetails(
+    params: ValidatePayeeDetailsRequest
+  ): Promise<ValidatePayeeDetailsResponse> {
+    return apiValidatePayeeDetails(params, this.apiKey, this.baseApiUrl);
   }
 
   /**

@@ -261,6 +261,23 @@ export type GetPayeeDetailsResponse = {
   statusCode: number;
 };
 
+export type ValidatePayeeDetailsRequest = {
+  processorName: string;
+  depositData: {
+    [key: string]: string;
+  };
+};
+
+export type ValidatePayeeDetailsResponse = {
+  success: boolean;
+  message: string;
+  responseObject: {
+    isValid: boolean;
+    errors?: string[];
+  };
+  statusCode: number;
+};
+
 export type ExtractedMetadataList = {
   [k: string]: any; // dynamic columns
   hidden: boolean;

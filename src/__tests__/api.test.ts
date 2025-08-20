@@ -1,5 +1,5 @@
-import { apiGetQuote } from '../adapters/api';
-import type { QuoteRequest } from '../types';
+import { apiGetQuote, apiValidatePayeeDetails } from '../adapters/api';
+import type { QuoteRequest, ValidatePayeeDetailsRequest } from '../types';
 
 // Mock fetch
 global.fetch = jest.fn();
@@ -155,5 +155,86 @@ describe('apiGetQuote', () => {
       expect.stringContaining('/quote/exact-fiat'),
       expect.any(Object)
     );
+  });
+});
+
+describe('apiValidatePayeeDetails', () => {
+  const mockApiKey = 'test-api-key';
+  const mockBaseUrl = 'https://api.example.com';
+  const mockResponse = {
+    success: true,
+    message: 'Validation successful',
+    responseObject: {
+      isValid: true,
+      errors: [],
+    },
+    statusCode: 200,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => mockResponse,
+    });
+  });
+
+  it('should call the validate endpoint with correct parameters', async () => {
+    const request: ValidatePayeeDetailsRequest = {
+      processorName: 'venmo',
+      depositData: {
+        venmoPayeeUsername: 'testuser',
+        venmoPayeeId: '123456',
+      },
+    };
+
+    await apiValidatePayeeDetails(request, mockApiKey, mockBaseUrl);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${mockBaseUrl}/makers/validate`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': mockApiKey,
+        },
+        body: JSON.stringify(request),
+      })
+    );
+  });
+
+  it('should return validation response with errors when invalid', async () => {
+    const errorResponse = {
+      success: false,
+      message: 'Validation failed',
+      responseObject: {
+        isValid: false,
+        errors: ['Invalid username format', 'ID does not match'],
+      },
+      statusCode: 200,
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => errorResponse,
+    });
+
+    const request: ValidatePayeeDetailsRequest = {
+      processorName: 'venmo',
+      depositData: {
+        venmoPayeeUsername: 'invalid@user',
+        venmoPayeeId: 'wrong',
+      },
+    };
+
+    const result = await apiValidatePayeeDetails(
+      request,
+      mockApiKey,
+      mockBaseUrl
+    );
+
+    expect(result).toEqual(errorResponse);
+    expect(result.responseObject.isValid).toBe(false);
+    expect(result.responseObject.errors).toHaveLength(2);
   });
 });
