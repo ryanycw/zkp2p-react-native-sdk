@@ -25,6 +25,10 @@ import type {
   ReleaseFundsToPayerParams,
   EscrowDepositView,
   EscrowIntentView,
+  GetOwnerDepositsRequest,
+  GetOwnerDepositsResponse,
+  GetIntentsByTakerRequest,
+  GetIntentsByTakerResponse,
 } from './types';
 import { fulfillIntent } from './actions/fulfillIntent';
 import { signalIntent } from './actions/signalIntent';
@@ -33,6 +37,8 @@ import {
   apiGetQuote,
   apiGetPayeeDetails,
   apiValidatePayeeDetails,
+  apiGetOwnerDeposits,
+  apiGetIntentsByTaker,
 } from './adapters/api';
 import { withdrawDeposit } from './actions/withdrawDeposit';
 import { cancelIntent } from './actions/cancelIntent';
@@ -236,6 +242,20 @@ export class Zkp2pClient {
     params: ValidatePayeeDetailsRequest
   ): Promise<ValidatePayeeDetailsResponse> {
     return apiValidatePayeeDetails(params, this.apiKey, this.baseApiUrl);
+  }
+
+  /** Fetch historical deposits for a given owner address via the API. */
+  async getAccountDepositsHistory(
+    params: GetOwnerDepositsRequest
+  ): Promise<GetOwnerDepositsResponse> {
+    return apiGetOwnerDeposits(params, this.apiKey, this.baseApiUrl);
+  }
+
+  /** Fetch historical intents for a given taker address with optional status filter. */
+  async getAccountIntentsHistory(
+    params: GetIntentsByTakerRequest
+  ): Promise<GetIntentsByTakerResponse> {
+    return apiGetIntentsByTaker(params, this.apiKey, this.baseApiUrl);
   }
 
   /**

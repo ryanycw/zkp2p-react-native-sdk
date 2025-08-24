@@ -14,9 +14,29 @@ This example app demonstrates the usage of the ZKP2P React Native SDK, showcasin
    - Proof generation with selected transaction
    - Error handling and loading states
 
-3. **API**
-   - Interacting with the ZKP2P API
-   - Interacting with the ZKP2P Smart Contracts
+3. **API & Smart Contract Interactions**
+   - Creating and managing deposits
+   - Signaling and canceling intents
+   - Withdrawing deposits
+   - Fetching deposits history by owner address
+   - Fetching intents history by taker address
+
+4. **Historical Data API Functions**
+   - **Get Account Deposits History**: Query any address to see their historical deposits with status filtering
+   - **Get Account Intents History**: Query any address to see their historical intents
+   - Located in the API Functions screen under "Historical Data API Functions" section
+   
+   ```typescript
+   // Example usage:
+   await zkp2pClient.getAccountDepositsHistory({ 
+     ownerAddress: '0x...', 
+     status: 'ACTIVE' 
+   });
+   
+   await zkp2pClient.getAccountIntentsHistory({ 
+     takerAddress: '0x...' 
+   });
+   ```
 
 ## Setup
 

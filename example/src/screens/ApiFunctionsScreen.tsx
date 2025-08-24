@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useZkp2p, DEPLOYED_ADDRESSES, currencyInfo } from '../../../src/';
 import type { Hash } from 'viem';
@@ -14,6 +15,8 @@ import {
   type CancelIntentParams,
   type EscrowDepositView,
   type EscrowIntentView,
+  type Deposit,
+  type Intent,
 } from '../../../src/types';
 import { BigNumber } from 'ethers';
 
@@ -40,6 +43,12 @@ export function ApiFunctionsScreen({
   const [deposits, setDeposits] = useState<EscrowDepositView[]>([]);
   const [intent, setIntent] = useState<EscrowIntentView | null>(null);
   const [venmoUsername, setVenmoUsername] = useState<string | null>(null);
+
+  // Historical API data state
+  const [ownerDeposits, setOwnerDeposits] = useState<Deposit[]>([]);
+  const [takerIntents, setTakerIntents] = useState<Intent[]>([]);
+  const [isLoadingOwnerDeposits, setIsLoadingOwnerDeposits] = useState(false);
+  const [isLoadingTakerIntents, setIsLoadingTakerIntents] = useState(false);
 
   // Find the first active deposit that is for Venmo with at least 1 USDC available
   const firstActiveDeposit = deposits.find((d) => {
@@ -118,16 +127,87 @@ export function ApiFunctionsScreen({
     }
   }, [zkp2pClient]);
 
+  // Fetch deposits history for connected account
+  const handleFetchOwnerDeposits = useCallback(async () => {
+    const connectedAddress = zkp2pClient?.walletClient?.account?.address;
+    if (!zkp2pClient || !connectedAddress) return;
+
+    setIsLoadingOwnerDeposits(true);
+    try {
+      console.log(
+        'Fetching deposits history for connected account:',
+        connectedAddress
+      );
+      const result = await zkp2pClient.getAccountDepositsHistory({
+        ownerAddress: connectedAddress,
+        status: 'ACTIVE', // Optional: filter by status
+      });
+
+      if (result.success && result.responseObject) {
+        setOwnerDeposits(result.responseObject);
+        console.log(
+          `Fetched ${result.responseObject.length} deposits for connected account`
+        );
+      } else {
+        setOwnerDeposits([]);
+        console.log('No deposits found for connected account');
+      }
+    } catch (error) {
+      console.error('Error fetching deposits history:', error);
+      setOwnerDeposits([]);
+    } finally {
+      setIsLoadingOwnerDeposits(false);
+    }
+  }, [zkp2pClient]);
+
+  // Fetch intents history for connected account
+  const handleFetchTakerIntents = useCallback(async () => {
+    const connectedAddress = zkp2pClient?.walletClient?.account?.address;
+    if (!zkp2pClient || !connectedAddress) return;
+
+    setIsLoadingTakerIntents(true);
+    try {
+      console.log(
+        'Fetching intents history for connected account:',
+        connectedAddress
+      );
+      const result = await zkp2pClient.getAccountIntentsHistory({
+        takerAddress: connectedAddress,
+      });
+
+      if (result.success && result.responseObject) {
+        setTakerIntents(result.responseObject);
+        console.log(
+          `Fetched ${result.responseObject.length} intents for connected account`
+        );
+        console.log('Intents:', result.responseObject);
+      } else {
+        setTakerIntents([]);
+        console.log('No intents found for connected account');
+      }
+    } catch (error) {
+      console.error('Error fetching intents history:', error);
+      setTakerIntents([]);
+    } finally {
+      setIsLoadingTakerIntents(false);
+    }
+  }, [zkp2pClient]);
+
   useEffect(() => {
     if (zkp2pClient?.walletClient?.account) {
       fetchDeposits();
       fetchIntents();
+      // Auto-fetch historical data on mount
+      handleFetchOwnerDeposits();
+      handleFetchTakerIntents();
     }
   }, [
     zkp2pClient,
     zkp2pClient?.walletClient?.account,
     fetchDeposits,
     fetchIntents,
+    handleFetchOwnerDeposits,
+    handleFetchTakerIntents,
   ]);
 
   const handleCreateDeposit = async () => {
@@ -286,7 +366,9 @@ export function ApiFunctionsScreen({
       <View style={styles.balanceContainer}>
         <Text style={styles.balanceLabel}>Wallet Address:</Text>
         <Text style={styles.addressText}>
-          {zkp2pClient?.walletClient?.account?.address || 'Not connected'}
+          {zkp2pClient?.walletClient?.account?.address
+            ? `${zkp2pClient.walletClient.account.address.slice(0, 6)}...${zkp2pClient.walletClient.account.address.slice(-4)}`
+            : 'Not connected'}
         </Text>
         <Text style={styles.balanceLabel}>ETH Balance:</Text>
         <Text style={styles.balanceText}>{ethBalance} ETH</Text>
@@ -395,10 +477,10 @@ export function ApiFunctionsScreen({
           {intent && (
             <View key={intent.intentHash} style={styles.tableRow}>
               <Text style={[styles.tableCell, styles.flex2]}>
-                {intent.intentHash.slice(0, 8)}...
+                {`${intent.intentHash.slice(0, 8)}...`}
               </Text>
               <Text style={[styles.tableCell]}>
-                {Number(intent.intent.amount) / 10 ** 6}
+                {`${(Number(intent.intent?.amount) / 1e6).toFixed(2)} USDC`}
               </Text>
               <Text style={[styles.tableCell]}>{venmoUsername || '-'}</Text>
               <View>
@@ -408,14 +490,139 @@ export function ApiFunctionsScreen({
                     styles.cancelButton,
                     isCancelLoading && styles.buttonDisabled,
                   ]}
-                  onPress={() => handleCancelIntent(intent.intentHash)}
-                  disabled={isCancelLoading}
+                  onPress={() =>
+                    intent.intentHash && handleCancelIntent(intent.intentHash)
+                  }
+                  disabled={isCancelLoading || !intent.intentHash}
                 >
                   <Text style={styles.actionButtonText}>
                     {isCancelLoading ? 'Cancelling...' : 'Cancel'}
                   </Text>
                 </TouchableOpacity>
               </View>
+            </View>
+          )}
+        </View>
+      </View>
+
+      {/* Historical Data Section */}
+      <View style={styles.apiSection}>
+        <Text style={styles.sectionTitle}>Account Historical Data</Text>
+
+        {/* Fetch Deposits History */}
+        <View style={styles.apiCard}>
+          <Text style={styles.apiCardTitle}>Your Deposits History</Text>
+          <Text style={styles.connectedAddressText}>
+            Connected Account:{' '}
+            {zkp2pClient?.walletClient?.account?.address
+              ? `${zkp2pClient.walletClient.account.address.slice(0, 6)}...${zkp2pClient.walletClient.account.address.slice(-4)}`
+              : 'Not connected'}
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.button,
+              styles.fetchButton,
+              isLoadingOwnerDeposits && styles.buttonDisabled,
+            ]}
+            onPress={handleFetchOwnerDeposits}
+            disabled={isLoadingOwnerDeposits}
+          >
+            {isLoadingOwnerDeposits ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Fetch My Deposits History</Text>
+            )}
+          </TouchableOpacity>
+
+          {ownerDeposits.length > 0 && (
+            <View style={styles.resultsContainer}>
+              <Text style={styles.resultsTitle}>
+                Found {ownerDeposits.length} deposits:
+              </Text>
+              {ownerDeposits.slice(0, 5).map((deposit, index) => {
+                if (!deposit) return null;
+                return (
+                  <View key={index} style={styles.resultItem}>
+                    <Text style={styles.resultText}>
+                      ID: {deposit.id || 'N/A'} | Amount:{' '}
+                      {`${(Number(deposit.amount) / 1e6).toFixed(2)} USDC`}
+                    </Text>
+                    <Text style={styles.resultSubtext}>
+                      Status: {deposit.status || 'Unknown'}
+                    </Text>
+                    {deposit.createdAt && (
+                      <Text style={styles.resultSubtext}>
+                        Created:{' '}
+                        {new Date(deposit.createdAt).toLocaleDateString()}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
+              {ownerDeposits.length > 5 && (
+                <Text style={styles.moreText}>
+                  ...and {ownerDeposits.length - 5} more
+                </Text>
+              )}
+            </View>
+          )}
+        </View>
+
+        {/* Fetch Intents History */}
+        <View style={styles.apiCard}>
+          <Text style={styles.apiCardTitle}>Your Intents History</Text>
+          <Text style={styles.connectedAddressText}>
+            Connected Account:{' '}
+            {zkp2pClient?.walletClient?.account?.address
+              ? `${zkp2pClient.walletClient.account.address.slice(0, 6)}...${zkp2pClient.walletClient.account.address.slice(-4)}`
+              : 'Not connected'}
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.button,
+              styles.fetchButton,
+              isLoadingTakerIntents && styles.buttonDisabled,
+            ]}
+            onPress={handleFetchTakerIntents}
+            disabled={isLoadingTakerIntents}
+          >
+            {isLoadingTakerIntents ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Fetch My Intents History</Text>
+            )}
+          </TouchableOpacity>
+
+          {takerIntents.length > 0 && (
+            <View style={styles.resultsContainer}>
+              <Text style={styles.resultsTitle}>
+                Found {takerIntents.length} intents:
+              </Text>
+              {takerIntents.slice(0, 5).map((item, index) => {
+                if (!item) return null;
+                return (
+                  <View key={index} style={styles.resultItem}>
+                    <Text style={styles.resultText}>
+                      Intent: {`${item.intentHash.slice(0, 10)}...`} | Amount:{' '}
+                      {`${(Number(item.amount) / 1e6).toFixed(2)} USDC`}
+                    </Text>
+                    <Text style={styles.resultSubtext}>
+                      Status: {item.status || 'Unknown'} | Deposit ID:{' '}
+                      {item.depositId || 'N/A'}
+                    </Text>
+                    {item.createdAt && (
+                      <Text style={styles.resultSubtext}>
+                        Created: {new Date(item.createdAt).toLocaleDateString()}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
+              {takerIntents.length > 5 && (
+                <Text style={styles.moreText}>
+                  ...and {takerIntents.length - 5} more
+                </Text>
+              )}
             </View>
           )}
         </View>
@@ -635,5 +842,81 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#000',
+  },
+  apiSection: {
+    marginTop: 30,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#333',
+  },
+  apiCard: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  apiCardTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 15,
+    color: '#444',
+  },
+  connectedAddressText: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 15,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  fetchButton: {
+    backgroundColor: '#5C6BC0',
+  },
+  resultsContainer: {
+    marginTop: 20,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  resultsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 10,
+    color: '#555',
+  },
+  resultItem: {
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e8e8e8',
+  },
+  resultText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 4,
+  },
+  resultSubtext: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  moreText: {
+    fontSize: 13,
+    color: '#888',
+    fontStyle: 'italic',
+    marginTop: 5,
+    textAlign: 'center',
   },
 });

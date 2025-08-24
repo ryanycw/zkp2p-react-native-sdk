@@ -6,6 +6,7 @@ export { Zkp2pClient } from './client';
 export { clearSession } from './utils/session';
 export { DEPLOYED_ADDRESSES } from './utils/constants';
 export { currencyInfo } from './utils/currency';
+export { apiGetOwnerDeposits, apiGetIntentsByTaker } from './adapters/api';
 
 // Error handling exports
 export {
@@ -41,6 +42,14 @@ export type {
   QuoteResponse,
   GetPayeeDetailsRequest,
   GetPayeeDetailsResponse,
+  GetOwnerDepositsRequest,
+  GetOwnerDepositsResponse,
+  GetIntentsByTakerRequest,
+  GetIntentsByTakerResponse,
+  Deposit,
+  DepositStatus,
+  Intent,
+  IntentStatusType,
   AuthWVOverrides,
 } from './types';
 export type { ClearSessionOptions } from './utils/session';
