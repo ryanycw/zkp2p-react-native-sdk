@@ -7,6 +7,7 @@ import type {
   ProofData,
   FlowState,
   InitiateOptions,
+  AutoGenerateProofOptions,
 } from '../types';
 import type { Zkp2pClient } from '../client';
 
@@ -22,7 +23,9 @@ export interface Zkp2pValues {
     actionType: string,
     options?: InitiateOptions
   ) => Promise<ProviderSettings>;
-  authenticate?: () => Promise<void>;
+  authenticate?: (
+    autoGenerateProof?: AutoGenerateProofOptions
+  ) => Promise<void>;
   authWebViewProps: React.ComponentProps<typeof InterceptWebView> | null;
   clearSession?: (options?: {
     clearInterceptedPayloads?: boolean;
