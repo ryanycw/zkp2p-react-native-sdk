@@ -24,7 +24,6 @@ import {
 
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { WebViewErrorEvent } from 'react-native-webview/lib/WebViewTypes';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import CookieManager from '@react-native-cookies/cookies';
 import { JSONPath } from 'jsonpath-plus';
 import type { WalletClient } from 'viem';
@@ -56,11 +55,22 @@ import type { GnarkBridge } from '../bridges/GnarkBridge';
 import { DEFAULT_USER_AGENT } from '../utils/constants';
 import { toDecimalString } from '../utils/format';
 import { parseReclaimProxyProof } from '../utils/reclaimProof';
-import { extractMetadata, safeStringify } from './utils';
+import {
+  extractMetadata,
+  preprocessBody,
+  buildHeadersToSend,
+  buildParamValues,
+  buildSecretParams,
+  saveInterceptedPayload,
+  loadInterceptedPayload,
+  type ReplayTarget,
+  replayAndResolve,
+} from './utils';
 
 import { RPCWebView } from '../components/RPCWebView';
 import Zkp2pContext from './Zkp2pContext';
 import { clearSession as clearSessionService } from '../utils/session';
+import { logger, setLogLevel } from '../utils/logger';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -76,6 +86,7 @@ interface Zkp2pProviderProps {
   apiKey?: string;
   chainId?: number;
   baseApiUrl?: string;
+  logLevel?: 'error' | 'info' | 'debug';
 }
 
 // ============================================================================
@@ -145,7 +156,7 @@ const calculateGnarkDynamicConcurrency = async (): Promise<number> => {
     } catch {}
     return finalConcurrency;
   } catch (error) {
-    console.log(
+    logger.info(
       '[zkp2p] Could not determine memory dynamically, using defaults:',
       error
     );
@@ -168,10 +179,15 @@ const Zkp2pProvider = ({
   apiKey,
   chainId = 8453,
   baseApiUrl = 'https://api.zkp2p.xyz/v1',
+  logLevel,
 }: Zkp2pProviderProps) => {
   // ==========================================================================
   // CLIENT INITIALIZATION
   // ==========================================================================
+
+  useEffect(() => {
+    if (logLevel) setLogLevel(logLevel);
+  }, [logLevel]);
 
   const zkp2pClient = useMemo(() => {
     if (!apiKey || !walletClient) {
@@ -253,10 +269,10 @@ const Zkp2pProvider = ({
       // Cancel any active proof generations when unmounting
       if (gnarkBridge) {
         gnarkBridge.cancelAllProofs().catch((err) => {
-          console.error('[zkp2p] Error cancelling proofs on unmount:', err);
+          logger.error('[zkp2p] Error cancelling proofs on unmount:', err);
         });
         gnarkBridge.cleanupMemory().catch((err) => {
-          console.error('[zkp2p] Error cleaning up memory on unmount:', err);
+          logger.error('[zkp2p] Error cleaning up memory on unmount:', err);
         });
       }
     };
@@ -306,11 +322,8 @@ const Zkp2pProvider = ({
 
   const _restoreSessionWith = useCallback(
     async (cfg: ProviderSettings) => {
-      const key = `intercepted_payload_${cfg.metadata.platform}_${cfg.actionType}`;
-      const raw = await AsyncStorage.getItem(key);
-      if (!raw) return false;
-
-      const payload: NetworkEvent = JSON.parse(raw);
+      const payload = await loadInterceptedPayload(cfg);
+      if (!payload) return false;
 
       if (payload.request.cookie) {
         await CookieManager.setFromResponse(
@@ -318,57 +331,33 @@ const Zkp2pProvider = ({
           payload.request.cookie
         );
       }
-      const replayOpts: RequestInit = {
-        method: payload.request.method,
-        headers: {
-          ...payload.request.headers,
-          'User-Agent': getCustomUserAgent(cfg),
-        },
-        credentials: 'include',
-      };
-      if (
-        payload.request.method !== 'GET' &&
-        payload.request.method !== 'HEAD' &&
-        payload.request.body
-      ) {
-        replayOpts.body = payload.request.body;
-      }
-      if (payload.request.cookie) {
-        replayOpts.headers = {
-          ...replayOpts.headers,
-          Cookie: payload.request.cookie,
-        };
-      }
-      const res = await fetch(payload.request.url, replayOpts);
-
-      if (!res.ok)
-        throw new Error(
-          `Session restore failed: ${res.status} ${res.statusText}`
-        );
-      const body = await res.json();
-
-      const refreshedHeaders: Record<string, string> = {};
       try {
-        res.headers?.forEach?.((v, k) => {
-          refreshedHeaders[k] = v;
-        });
-      } catch {}
-      const updatedPayload: NetworkEvent = {
-        ...payload,
-        response: {
-          url: (res as any).url || payload.response.url,
-          status: res.status,
-          headers: Object.keys(refreshedHeaders).length
-            ? refreshedHeaders
-            : payload.response.headers,
-          body: JSON.stringify(body),
-        },
-      };
-
-      setInterceptedPayload(updatedPayload);
-      setMetadataList(extractMetadata(body, cfg));
-      setFlowState('authenticated');
-      return true;
+        const target = {
+          // Prefer configured metadataUrl; otherwise replay the last responded URL
+          // from the stored payload rather than the original request URL.
+          url: cfg.metadata.metadataUrl || payload.response.url,
+          method:
+            (cfg.metadata.metadataUrlMethod as any) ||
+            payload.request.method ||
+            'GET',
+          body: cfg.metadata.metadataUrl
+            ? cfg.metadata.metadataUrlBody
+            : payload.request.body || undefined,
+        } as ReplayTarget;
+        const resolved = await replayAndResolve(
+          payload,
+          target,
+          getCustomUserAgent(cfg)
+        );
+        const bodyJson = resolved.bodyJson ?? JSON.parse(resolved.bodyStr);
+        setInterceptedPayload(resolved.updatedPayload);
+        setMetadataList(extractMetadata(bodyJson, cfg));
+        setFlowState('authenticated');
+        return true;
+      } catch (e) {
+        // Surface restore errors to caller (_authenticateInternal) to handle
+        throw e;
+      }
     },
     [setInterceptedPayload, setMetadataList]
   );
@@ -389,83 +378,34 @@ const Zkp2pProvider = ({
         return;
       }
 
-      await AsyncStorage.setItem(
-        `intercepted_payload_${metadata.platform}_${cfg.actionType}`,
-        safeStringify(evt)
-      );
+      await saveInterceptedPayload(cfg, evt);
 
-      let jsonBody: any;
       let itemExtractionError: Error | null = null;
-      let effectivePayload: NetworkEvent = evt;
 
       try {
-        if (primaryHit) {
-          const raw = metadata.preprocessRegex
-            ? ((evt.response.body ?? '').match(
-                new RegExp(metadata.preprocessRegex)
-              )?.[1] ?? '{}')
-            : (evt.response.body ?? '{}');
-          jsonBody = JSON.parse(raw);
-        } else {
-          if (evt.request.cookie) {
-            await CookieManager.setFromResponse(
-              evt.request.url,
-              evt.request.cookie
-            );
-          }
-          const replayOpts: RequestInit = {
-            method: metadata.method,
-            headers: {
-              ...evt.request.headers,
-              'User-Agent': getCustomUserAgent(cfg),
-            },
-            credentials: 'include',
-          };
-          if (
-            metadata.method !== 'GET' &&
-            metadata.method !== 'HEAD' &&
-            cfg.body
-          ) {
-            replayOpts.body = cfg.body;
-          }
-          if (evt.request.cookie) {
-            replayOpts.headers = {
-              ...replayOpts.headers,
-              Cookie: evt.request.cookie,
-            };
-          }
-          const resp = await fetch(cfg.url, replayOpts);
-          if (!resp.ok)
-            throw new Error(
-              `Failed to fetch transaction data: ${resp.status} ${resp.statusText}`
-            );
-          jsonBody = await resp.json();
-          console.log(
-            `[zkp2p] Fallback replay response:`,
-            JSON.stringify(jsonBody)
-          );
-
-          // Always update the headers to the latest values
-          const refreshedHeaders: Record<string, string> = {};
-          try {
-            resp.headers?.forEach?.((v, k) => {
-              refreshedHeaders[k] = v;
-            });
-          } catch {}
-
-          const updatedEvt: NetworkEvent = {
-            ...evt,
-            response: {
-              url: (resp as any).url || evt.response.url,
-              status: resp.status,
-              headers: Object.keys(refreshedHeaders).length
-                ? refreshedHeaders
-                : evt.response.headers,
-              body: JSON.stringify(jsonBody),
-            },
-          };
-          effectivePayload = updatedEvt;
-        }
+        // Build the replay target. On fallback hits, prefer replaying the matched URL
+        // (evt.response.url) instead of any configured metadataUrl override.
+        const target = {
+          url: fallbackHit
+            ? evt.response.url
+            : metadata.metadataUrl || evt.response.url,
+          method: fallbackHit
+            ? evt.request.method || 'GET'
+            : (metadata.metadataUrlMethod as any) ||
+              evt.request.method ||
+              'GET',
+          body:
+            !fallbackHit && metadata.metadataUrl
+              ? metadata.metadataUrlBody
+              : evt.request.body || undefined,
+        } as ReplayTarget;
+        const resolved = await replayAndResolve(
+          evt,
+          target,
+          getCustomUserAgent(cfg)
+        );
+        const jsonBody = resolved.bodyJson ?? JSON.parse(resolved.bodyStr);
+        const effectivePayload: NetworkEvent = resolved.updatedPayload;
 
         const txs = extractMetadata(jsonBody, cfg);
         setMetadataList(txs);
@@ -483,7 +423,7 @@ const Zkp2pProvider = ({
         setFlowState('authenticated');
         setAuthError(itemExtractionError);
       } catch (err) {
-        console.error(
+        logger.error(
           '[zkp2p] failed to retrieve/process JSON body (via _handleAuthIntercept):',
           err
         );
@@ -545,7 +485,7 @@ const Zkp2pProvider = ({
         style: { flex: 1 },
         onIntercept: (evt: NetworkEvent) => _handleAuthIntercept(evt, cfg),
         onError: (e: WebViewErrorEvent) => {
-          console.error('[zkp2p] Auth webview error:', e.nativeEvent);
+          logger.error('[zkp2p] Auth webview error:', e.nativeEvent);
           setAuthError(new Error(String(e.nativeEvent?.description ?? e.type)));
           setAuthWebViewProps(null);
         },
@@ -565,7 +505,7 @@ const Zkp2pProvider = ({
           return;
         }
       } catch (err) {
-        console.warn('[zkp2p] Stored session invalid:', err);
+        logger.warn('[zkp2p] Stored session invalid:', err);
         setAuthError(err as Error);
       }
 
@@ -620,7 +560,7 @@ const Zkp2pProvider = ({
           )
         : '';
 
-      console.log('[zkp2p] Action WebView injectedScript:', injectedScript);
+      logger.debug('[zkp2p] Action WebView injectedScript:', injectedScript);
 
       setAuthWebViewProps({
         source: { uri: effectiveActionUrl },
@@ -648,7 +588,7 @@ const Zkp2pProvider = ({
           }
         },
         onError: (e: WebViewErrorEvent) => {
-          console.error(
+          logger.error(
             '[zkp2p] InitialAction WebView error:',
             e.nativeEvent?.description ?? e.type
           );
@@ -700,7 +640,7 @@ const Zkp2pProvider = ({
       try {
         await Linking.openURL(effectiveActionUrl);
       } catch (linkErr) {
-        console.warn('[zkp2p] Failed to open external URL:', linkErr);
+        logger.warn('[zkp2p] Failed to open external URL:', linkErr);
 
         // Check if app store links are available for fallback
         const appStoreLink =
@@ -739,10 +679,7 @@ const Zkp2pProvider = ({
                     );
                     setFlowState('idle');
                   } catch (storeErr) {
-                    console.error(
-                      '[zkp2p] Failed to open app store:',
-                      storeErr
-                    );
+                    logger.error('[zkp2p] Failed to open app store:', storeErr);
                     setAuthError(new Error('Failed to open app store'));
                     setFlowState('idle');
                   }
@@ -824,7 +761,7 @@ const Zkp2pProvider = ({
 
       const promise = new Promise<RPCResponse>((resolve, reject) => {
         const timeout = setTimeout(() => {
-          console.error('[Zkp2pProvider] RPC timeout exceeded:', {
+          logger.error('[Zkp2pProvider] RPC timeout exceeded:', {
             id,
             type,
             rpcTimeout: rpcTimeout / 1000 + 's',
@@ -878,7 +815,7 @@ const Zkp2pProvider = ({
         clearTimeout(pending.current[id]?.timeout);
         delete pending.current[id];
       } else if (type === 'error') {
-        console.error('[zkp2p] RPC error:', data);
+        logger.error('[zkp2p] RPC error:', data);
 
         // RPC errors come in format: {type: 'error', data: {message: '...', stack: '...'}}
         const errorMessage = (data as any).data?.message || 'Unknown error';
@@ -896,7 +833,7 @@ const Zkp2pProvider = ({
         delete pending.current[id];
       }
     } catch (error) {
-      console.error('[zkp2p] Failed to process WebView message:', error);
+      logger.error('[zkp2p] Failed to process WebView message:', error);
     }
   }, []);
 
@@ -939,7 +876,7 @@ const Zkp2pProvider = ({
         throw new Error(`Unsupported prover: ${prover}`);
       }
 
-      console.log('[zkp2p] Starting proof generation...');
+      logger.info('[zkp2p] Starting proof generation...');
       setFlowState('proofGenerating');
       setProofData([]);
       setProofError(null);
@@ -951,63 +888,33 @@ const Zkp2pProvider = ({
             await gnarkBridge.cancelAllProofs();
             await gnarkBridge.cleanupMemory();
           } catch (e) {
-            console.warn('[zkp2p] Preflight cleanup warning:', e);
+            logger.warn('[zkp2p] Preflight cleanup warning:', e);
           }
         }
 
         // Abort any outstanding RPC requests from a previous attempt
         const aborted = abortAllPending('New proof started');
         if (aborted > 0) {
-          console.log('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
+          logger.info('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
         }
         // Keep preflight simple (no global abort/remount): rely on timeout guards
 
-        let body = payload.response.body ?? '{}';
-        if (providerCfg.metadata.preprocessRegex) {
-          const m = body.match(
-            new RegExp(providerCfg.metadata.preprocessRegex)
-          );
-          if (m?.[1]) body = m[1];
-        }
-        const headersArray = Object.entries(payload.request.headers);
-        const headersToSend: Record<string, string> =
-          providerCfg.skipRequestHeaders.length > 0
-            ? headersArray.reduce(
-                (acc, [name, value]) => {
-                  if (!providerCfg.skipRequestHeaders.includes(name)) {
-                    acc[name] = value;
-                  }
-                  return acc;
-                },
-                {} as Record<string, string>
-              )
-            : {};
-        headersToSend['User-Agent'] = getCustomUserAgent(providerCfg);
-        const paramValues: Record<string, string> = {};
-        providerCfg.paramNames?.forEach((name, idx) => {
-          const sel = providerCfg.paramSelectors?.[idx];
-          if (!sel) return;
-          if (sel.type === 'jsonPath') {
-            const val = (
-              JSONPath({
-                path: sel.value.replace('{{INDEX}}', String(itemIndex)),
-                json: JSON.parse(body),
-                resultType: 'value',
-              }) as any[]
-            )[0];
-            paramValues[name] = String(val ?? '');
-          } else {
-            const m = body.match(new RegExp(sel.value));
-            if (m?.[1]) paramValues[name] = m[1];
-          }
-        });
-        const secret: { headers: Record<string, string>; cookieStr?: string } =
-          { headers: {} };
-        providerCfg.secretHeaders?.forEach((h) => {
-          h === 'Cookie'
-            ? (secret.cookieStr = payload.request.cookie ?? '')
-            : (secret.headers[h] = payload.request.headers[h] ?? '');
-        });
+        let body = preprocessBody(
+          providerCfg.metadata.preprocessRegex,
+          payload.response.body ?? '{}'
+        );
+        const headersToSend = buildHeadersToSend(
+          payload.request.headers,
+          providerCfg.skipRequestHeaders,
+          getCustomUserAgent(providerCfg)
+        );
+        const paramValues = buildParamValues(
+          providerCfg,
+          payload,
+          body,
+          itemIndex
+        );
+        const secret = buildSecretParams(providerCfg, payload);
         const rpc: RPCCreateClaimOptions = {
           name: 'http',
           context: JSON.stringify({
@@ -1041,9 +948,9 @@ const Zkp2pProvider = ({
               : 1,
         };
         const res = await _rpcRequest('createClaim', rpc, (stepData) => {
-          console.log('[zkp2p] Proof generation step:', stepData);
+          logger.debug('[zkp2p] Proof generation step:', stepData);
           if (stepData.step?.error) {
-            console.error(
+            logger.error(
               '[zkp2p] Proof generation step error:',
               stepData.step.error
             );
@@ -1067,7 +974,7 @@ const Zkp2pProvider = ({
             const additionalProofConfig = providerCfg.additionalProofs[i];
             if (!additionalProofConfig) continue;
 
-            console.log(
+            logger.debug(
               `[zkp2p] Generating additional proof ${i + 1}/${providerCfg.additionalProofs.length}...`
             );
 
@@ -1191,58 +1098,26 @@ const Zkp2pProvider = ({
         try {
           await gnarkBridge.waitForIdle(2000);
         } catch (e) {
-          console.warn('[zkp2p] waitForIdle before additional proof timed out');
+          logger.warn('[zkp2p] waitForIdle before additional proof timed out');
         }
       }
 
-      let body = payload.response.body ?? '{}';
-      if (providerCfg.metadata.preprocessRegex) {
-        const m = body.match(new RegExp(providerCfg.metadata.preprocessRegex));
-        if (m?.[1]) body = m[1];
-      }
-
-      const headersArray = Object.entries(payload.request.headers);
-      const headersToSend: Record<string, string> =
-        providerCfg.skipRequestHeaders.length > 0
-          ? headersArray.reduce(
-              (acc, [name, value]) => {
-                if (!providerCfg.skipRequestHeaders.includes(name)) {
-                  acc[name] = value;
-                }
-                return acc;
-              },
-              {} as Record<string, string>
-            )
-          : {};
-      headersToSend['User-Agent'] = getCustomUserAgent(providerCfg);
-
-      const paramValues: Record<string, string> = {};
-      providerCfg.paramNames?.forEach((name, idx) => {
-        const sel = providerCfg.paramSelectors?.[idx];
-        if (!sel) return;
-        if (sel.type === 'jsonPath') {
-          const val = (
-            JSONPath({
-              path: sel.value.replace('{{INDEX}}', String(itemIndex)),
-              json: JSON.parse(body),
-              resultType: 'value',
-            }) as any[]
-          )[0];
-          paramValues[name] = String(val ?? '');
-        } else {
-          const m = body.match(new RegExp(sel.value));
-          if (m?.[1]) paramValues[name] = m[1];
-        }
-      });
-
-      const secret: { headers: Record<string, string>; cookieStr?: string } = {
-        headers: {},
-      };
-      providerCfg.secretHeaders?.forEach((h) => {
-        h === 'Cookie'
-          ? (secret.cookieStr = payload.request.cookie ?? '')
-          : (secret.headers[h] = payload.request.headers[h] ?? '');
-      });
+      let body = preprocessBody(
+        providerCfg.metadata.preprocessRegex,
+        payload.response.body ?? '{}'
+      );
+      const headersToSend = buildHeadersToSend(
+        payload.request.headers,
+        providerCfg.skipRequestHeaders,
+        getCustomUserAgent(providerCfg)
+      );
+      const paramValues = buildParamValues(
+        providerCfg,
+        payload,
+        body,
+        itemIndex
+      );
+      const secret = buildSecretParams(providerCfg, payload);
 
       const rpc: RPCCreateClaimOptions = {
         name: 'http',
@@ -1278,9 +1153,9 @@ const Zkp2pProvider = ({
       };
 
       const res = await _rpcRequest('createClaim', rpc, (stepData) => {
-        console.log('[zkp2p] Proof generation step:', stepData);
+        logger.debug('[zkp2p] Proof generation step:', stepData);
         if (stepData.step?.error) {
-          console.error(
+          logger.error(
             '[zkp2p] Proof generation step error:',
             stepData.step.error
           );
@@ -1331,7 +1206,7 @@ const Zkp2pProvider = ({
 
         return result;
       } catch (error) {
-        console.error('[zkp2p] Auto-generation failed:', error);
+        logger.error('[zkp2p] Auto-generation failed:', error);
         options.onProofError?.(error as Error);
         // Don't set flow state to idle - let it fall back to showing transactions
         return null;
@@ -1630,7 +1505,7 @@ const Zkp2pProvider = ({
               <TouchableOpacity
                 style={styles.proofSpinnerExitButton}
                 onPress={async () => {
-                  console.log(
+                  logger.info(
                     '[zkp2p] Exit button pressed, cancelling proof generation'
                   );
 
@@ -1638,9 +1513,9 @@ const Zkp2pProvider = ({
                   if (gnarkBridge && flowState === 'proofGenerating') {
                     try {
                       await gnarkBridge.cancelAllProofs();
-                      console.log('[zkp2p] All proof generations cancelled');
+                      logger.info('[zkp2p] All proof generations cancelled');
                     } catch (err) {
-                      console.error('[zkp2p] Error cancelling proofs:', err);
+                      logger.error('[zkp2p] Error cancelling proofs:', err);
                     }
                   }
 
@@ -1652,16 +1527,16 @@ const Zkp2pProvider = ({
                   if (gnarkBridge) {
                     try {
                       await gnarkBridge.cleanupMemory();
-                      console.log('[zkp2p] Memory cleaned up');
+                      logger.info('[zkp2p] Memory cleaned up');
                     } catch (err) {
-                      console.error('[zkp2p] Error cleaning up memory:', err);
+                      logger.error('[zkp2p] Error cleaning up memory:', err);
                     }
                   }
 
                   // Abort any outstanding RPC promises and remount the RPC channel
                   const aborted = abortAllPending('User cancelled');
                   if (aborted > 0) {
-                    console.log(
+                    logger.info(
                       '[zkp2p] Aborted',
                       aborted,
                       'pending RPC request(s)'
@@ -1758,7 +1633,7 @@ const Zkp2pProvider = ({
                           lastProofItemIndex
                         );
                       } catch (err) {
-                        console.error('[zkp2p] Retry failed:', err);
+                        logger.error('[zkp2p] Retry failed:', err);
                       }
                     }}
                   >

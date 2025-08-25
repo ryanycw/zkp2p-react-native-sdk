@@ -1,6 +1,7 @@
 import { NativeEventEmitter } from 'react-native';
 import type { Spec as GnarkModuleSpec } from '../NativeZkp2pGnarkModule';
 import { ProofGenerationError, ValidationError } from '../errors';
+import { logger } from '../utils/logger';
 
 export interface GnarkProofResult {
   proof: string;
@@ -32,7 +33,7 @@ export class GnarkBridge {
     this.activeRequestIds = new Set();
 
     this.eventEmitter.addListener('GnarkRPCResponse', (event) => {
-      console.log('[GnarkBridge] Received event:', event.id, event.type);
+      logger.debug('[GnarkBridge] Received event:', event.id, event.type);
 
       const { id, response, error } = event;
       const listener = this.responseListeners.get(id);
@@ -41,7 +42,7 @@ export class GnarkBridge {
         this.responseListeners.delete(id);
         this.activeRequestIds.delete(id);
       } else {
-        console.warn('[GnarkBridge] No listener found for request:', id);
+        logger.warn('[GnarkBridge] No listener found for request:', id);
       }
     });
   }
@@ -61,7 +62,7 @@ export class GnarkBridge {
     return new Promise((resolve, reject) => {
       this.activeRequestIds.add(requestId);
       this.responseListeners.set(requestId, ({ response, error }) => {
-        console.log('[GnarkBridge] Received response for:', requestId);
+        logger.debug('[GnarkBridge] Received response for:', requestId);
         this.activeRequestIds.delete(requestId);
 
         if (error) {
@@ -73,10 +74,7 @@ export class GnarkBridge {
           );
         } else {
           if (!response || !response.proof || !response.publicSignals) {
-            console.error(
-              '[GnarkBridge] Invalid response structure:',
-              response
-            );
+            logger.error('[GnarkBridge] Invalid response structure:', response);
             reject(
               new ProofGenerationError(
                 'Invalid proof response: missing proof or publicSignals',
@@ -91,7 +89,7 @@ export class GnarkBridge {
         }
       });
 
-      console.log(
+      logger.debug(
         '[GnarkBridge] Calling native groth16Prove with algorithm:',
         algorithm
       );
@@ -99,7 +97,7 @@ export class GnarkBridge {
       this.nativeModule
         .executeZkFunction(requestId, 'groth16Prove', [witness], algorithm)
         .catch((err: Error) => {
-          console.error('[GnarkBridge] Native module error:', err);
+          logger.error('[GnarkBridge] Native module error:', err);
           this.responseListeners.delete(requestId);
           this.activeRequestIds.delete(requestId);
           reject(
@@ -118,7 +116,7 @@ export class GnarkBridge {
    * @returns Promise resolving when cancellation is complete
    */
   async cancelProofGeneration(requestId: string): Promise<void> {
-    console.log('[GnarkBridge] Cancelling proof generation for:', requestId);
+    logger.info('[GnarkBridge] Cancelling proof generation for:', requestId);
 
     // Remove the listener if it exists
     if (this.responseListeners.has(requestId)) {
@@ -130,7 +128,7 @@ export class GnarkBridge {
       // Call native module to cancel
       await (this.nativeModule as any).cancelProofGeneration(requestId);
     } catch (err) {
-      console.error('[GnarkBridge] Error cancelling proof generation:', err);
+      logger.error('[GnarkBridge] Error cancelling proof generation:', err);
       throw new ProofGenerationError(
         `Failed to cancel proof generation: ${(err as Error).message}`,
         { requestId, originalError: err }
@@ -143,7 +141,7 @@ export class GnarkBridge {
    * @returns Promise resolving when all cancellations are complete
    */
   async cancelAllProofs(): Promise<void> {
-    console.log('[GnarkBridge] Cancelling all active proofs');
+    logger.info('[GnarkBridge] Cancelling all active proofs');
 
     const activeIds = Array.from(this.activeRequestIds);
 
@@ -158,7 +156,7 @@ export class GnarkBridge {
    * @returns Promise resolving when cleanup is complete
    */
   async cleanupMemory(): Promise<void> {
-    console.log('[GnarkBridge] Cleaning up memory');
+    logger.info('[GnarkBridge] Cleaning up memory');
 
     // Cancel all active proofs first
     await this.cancelAllProofs();
@@ -167,7 +165,7 @@ export class GnarkBridge {
       // Call native module to clean up memory
       await (this.nativeModule as any).cleanupMemory();
     } catch (err) {
-      console.error('[GnarkBridge] Error cleaning up memory:', err);
+      logger.error('[GnarkBridge] Error cleaning up memory:', err);
       throw new ProofGenerationError(
         `Failed to clean up memory: ${(err as Error).message}`,
         { originalError: err }
@@ -208,7 +206,7 @@ export class GnarkBridge {
   dispose(): void {
     // Cancel all active proofs before disposing
     this.cancelAllProofs().catch((err) => {
-      console.error(
+      logger.error(
         '[GnarkBridge] Error cancelling proofs during disposal:',
         err
       );

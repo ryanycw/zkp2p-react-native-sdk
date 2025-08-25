@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CookieManager from '@react-native-cookies/cookies';
+import { logger } from './logger';
 
 export type ClearSessionOptions = {
   clearInterceptedPayloads?: boolean;
@@ -17,7 +18,7 @@ export async function clearSession(
   try {
     await CookieManager.clearAll(iosAlsoClearWebKitStore as any);
   } catch (err) {
-    console.warn('[zkp2p] Failed to clear cookies:', err);
+    logger.warn('[zkp2p] Failed to clear cookies:', err);
   }
 
   if (clearInterceptedPayloads) {
@@ -28,7 +29,7 @@ export async function clearSession(
         await AsyncStorage.multiRemove(toRemove);
       }
     } catch (err) {
-      console.warn('[zkp2p] Failed to clear intercepted payloads:', err);
+      logger.warn('[zkp2p] Failed to clear intercepted payloads:', err);
     }
   }
 }

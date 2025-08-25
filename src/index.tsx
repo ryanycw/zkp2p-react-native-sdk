@@ -7,6 +7,8 @@ export { clearSession } from './utils/session';
 export { DEPLOYED_ADDRESSES } from './utils/constants';
 export { currencyInfo } from './utils/currency';
 export { apiGetOwnerDeposits, apiGetIntentsByTaker } from './adapters/api';
+export { setLogLevel } from './utils/logger';
+export type { LogLevel } from './utils/logger';
 
 // Error handling exports
 export {

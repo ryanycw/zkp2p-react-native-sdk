@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useRef } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { GnarkBridge } from '../bridges/GnarkBridge';
+import { logger } from '../utils/logger';
 
 interface RPCWebViewProps {
   onMessage: (event: WebViewMessageEvent) => void;
@@ -32,14 +33,20 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
           const data = JSON.parse(event.nativeEvent.data);
 
           if (data.type === 'console') {
-            if (data.level === 'error' || data.level === 50) {
-              console.error(`[WebView Console Error]`, ...(data.data || []));
+            const level = data.level;
+            const payload = data.data || [];
+            if (level === 'error' || level === 50) {
+              logger.error('[WebView Console Error]', ...payload);
+            } else if (level === 'warn') {
+              logger.warn('[WebView Console Warn]', ...payload);
+            } else {
+              logger.debug('[WebView Console]', ...payload);
             }
             return;
           }
 
           if (data.type === 'executeZkFunctionV3' && gnarkBridge) {
-            console.log('[RPCWebView] Received executeZkFunctionV3 request:', {
+            logger.debug('[RPCWebView] Received executeZkFunctionV3 request:', {
               id: data.id,
               module: data.module,
               fn: data.request?.fn,
@@ -72,7 +79,7 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
                     const witnessObj = JSON.parse(decodedWitness);
                     cipherParsed = witnessObj.cipher || 'aes-256-ctr';
                   } catch (e) {
-                    console.warn(
+                    logger.warn(
                       '[RPCWebView] Failed to extract cipher from witness:',
                       e
                     );
@@ -85,7 +92,7 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
                     witnessForGnark = JSON.stringify(witness);
                   }
 
-                  console.log(
+                  logger.debug(
                     '[RPCWebView] Passing witness to gnark with algorithm:',
                     cipherParsed
                   );
@@ -95,7 +102,7 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
                     cipherParsed
                   );
 
-                  console.log('[RPCWebView] Proof generated successfully');
+                  logger.info('[RPCWebView] Proof generated successfully');
 
                   // Ensure we have valid strings
                   if (!proofResult.proof || !proofResult.publicSignals) {
@@ -148,7 +155,7 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
                 );
               }
 
-              console.log('[RPCWebView] Sending response to server');
+              logger.debug('[RPCWebView] Sending response to server');
 
               try {
                 // Send response as a STRING to match witness server expectations
@@ -172,10 +179,7 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
                 throw stringifyError;
               }
             } catch (error) {
-              console.error(
-                '[RPCWebView] ZK function execution failed:',
-                error
-              );
+              logger.error('[RPCWebView] ZK function execution failed:', error);
               const errorResponse = {
                 id: data.id,
                 module: data.module || 'attestor-core',
@@ -275,7 +279,7 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
           onLoad={onLoad}
           onError={(syntheticEvent) => {
             const { nativeEvent } = syntheticEvent;
-            console.error('[RPCWebView] WebView error:', nativeEvent);
+            logger.error('[RPCWebView] WebView error:', nativeEvent);
             onError?.(nativeEvent);
           }}
           injectedJavaScript={injectedJavaScript}

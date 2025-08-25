@@ -4,6 +4,7 @@
  */
 import { GnarkBridge } from './GnarkBridge';
 import { nativeModuleService } from '../services/NativeModuleService';
+import { logger } from '../utils/logger';
 
 class BridgeFactoryImpl {
   private gnarkBridgeInstance: GnarkBridge | null = null;
@@ -26,7 +27,7 @@ class BridgeFactoryImpl {
       this.gnarkBridgeInstance = new GnarkBridge(gnarkModule);
       return this.gnarkBridgeInstance;
     } catch (error) {
-      console.error('[BridgeFactory] Failed to create GnarkBridge:', error);
+      logger.error('[BridgeFactory] Failed to create GnarkBridge:', error);
       return null;
     }
   }

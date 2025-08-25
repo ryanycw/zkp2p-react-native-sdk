@@ -49,8 +49,6 @@ export interface Zkp2pClientOptions {
   baseApiUrl?: string;
   witnessUrl?: string;
   rpcUrl?: string;
-  logLevel?: 'silent' | 'error' | 'info' | 'debug';
-  pollingInterval?: number; // ms
 }
 
 export type TxCallbackParams = {
@@ -439,6 +437,17 @@ export interface Selector {
   value: string;
 }
 
+// Extended selector allowing selection from multiple sources.
+export interface ParamSelector extends Selector {
+  // Defaults to 'responseBody' for backward compatibility
+  source?:
+    | 'responseBody'
+    | 'requestBody'
+    | 'requestHeaders'
+    | 'responseHeaders'
+    | 'url';
+}
+
 export interface ResponseMatch extends Selector {
   hash?: boolean;
 }
@@ -464,6 +473,10 @@ export interface ProviderMetadata {
   shouldReplayRequestInPage?: boolean;
   transactionsExtraction: TransactionsExtraction;
   proofMetadataSelectors: Selector[];
+  // Optional dedicated endpoint to fetch metadata safely (must be same-origin & HTTPS)
+  metadataUrl?: string;
+  metadataUrlMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH';
+  metadataUrlBody?: string;
 }
 
 export interface AdditionalProof {
@@ -471,7 +484,7 @@ export interface AdditionalProof {
   method: string;
   body: string;
   paramNames: string[];
-  paramSelectors: Selector[];
+  paramSelectors: ParamSelector[];
   skipRequestHeaders: string[];
   secretHeaders: string[];
   responseMatches: ResponseMatch[];
@@ -488,7 +501,7 @@ export interface ProviderSettings {
   countryCode?: string;
   metadata: ProviderMetadata;
   paramNames: string[];
-  paramSelectors: Selector[];
+  paramSelectors: ParamSelector[];
   secretHeaders: string[];
   responseMatches: ResponseMatch[];
   responseRedactions: ResponseRedaction[];

@@ -118,6 +118,20 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
 
+      - name: Select Xcode 16
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.*'
+
+      - name: Ensure iOS 18 simulator runtime
+        run: |
+          echo "Installed runtimes before:" && xcrun simctl list runtimes
+          if ! xcrun simctl list runtimes | grep -q "iOS 18.0"; then
+            sudo xcodebuild -downloadPlatform iOS || true
+            sudo xcodebuild -runFirstLaunch || true
+          fi
+          echo "Installed runtimes after:" && xcrun simctl list runtimes
+
       - name: Cache turborepo for iOS
         uses: actions/cache@v4
         with:

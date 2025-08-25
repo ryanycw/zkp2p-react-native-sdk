@@ -4,6 +4,7 @@
  */
 import { NativeModules } from 'react-native';
 import type { Spec as GnarkModuleSpec } from '../NativeZkp2pGnarkModule';
+import { logger } from '../utils/logger';
 
 export interface NativeModuleServiceInterface {
   getGnarkModule(): GnarkModuleSpec | null;
@@ -30,12 +31,12 @@ class NativeModuleServiceImpl implements NativeModuleServiceInterface {
       if (module && typeof module.executeZkFunction === 'function') {
         this.gnarkModule = module;
       } else {
-        console.warn(
+        logger.warn(
           '[NativeModuleService] Gnark module not available or invalid'
         );
       }
     } catch (error) {
-      console.error(
+      logger.error(
         '[NativeModuleService] Failed to load native modules:',
         error
       );

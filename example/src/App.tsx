@@ -299,6 +299,7 @@ export default function App() {
       baseApiUrl="https://api-staging-testnet.zkp2p.xyz/v1"
       rpcTimeout={60000}
       prover="reclaim_gnark"
+      logLevel="debug"
     >
       <AppContent
         walletClient={walletClient}

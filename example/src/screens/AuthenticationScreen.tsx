@@ -242,6 +242,21 @@ export const AuthenticationScreen: React.FC<Props> = ({
           <Text style={styles.buttonText}>Cash App</Text>
         )}
       </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[
+          styles.button,
+          isAuthenticating && activePlatform === 'luxon' && styles.disabled,
+        ]}
+        disabled={isAuthenticating && activePlatform === 'luxon'}
+        onPress={() => handleSelect('luxon', 'transfer_luxon')}
+      >
+        {isAuthenticating && activePlatform === 'luxon' ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Luxon</Text>
+        )}
+      </TouchableOpacity>
     </View>
   );
 };

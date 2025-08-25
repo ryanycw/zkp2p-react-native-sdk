@@ -33,5 +33,25 @@ target 'Zkp2pReactNativeSdkExample' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Ensure all Pods use a supported iOS deployment target for Xcode 15+
+    # and align with React Native's minimum (13.4+ from RN 0.75+).
+    min_target = Gem::Version.new('13.4')
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        next if current.nil?
+
+        begin
+          curr_ver = Gem::Version.new(current.to_s)
+        rescue ArgumentError
+          next
+        end
+
+        if curr_ver < min_target
+          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_target.to_s
+        end
+      end
+    end
   end
 end
