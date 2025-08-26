@@ -24,6 +24,7 @@ export async function replayAndResolve(
   target: ReplayTarget,
   userAgent: string
 ): Promise<ResolvedPayload> {
+  console.log('evt', evt);
   const res = await fetch(target.url, {
     method: (target.method as any) || 'GET',
     headers: {
@@ -34,6 +35,7 @@ export async function replayAndResolve(
     body: target.body,
     credentials: 'include',
   } as any);
+  console.log('res', res);
   if (!res.ok) {
     throw new Error(
       `Failed to fetch transaction data: ${res.status} ${res.statusText}`

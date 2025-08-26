@@ -7,7 +7,7 @@ import type {
   ProofData,
   FlowState,
   InitiateOptions,
-  AutoGenerateProofOptions,
+  AuthenticateOptions,
 } from '../types';
 import type { Zkp2pClient } from '../client';
 
@@ -24,7 +24,9 @@ export interface Zkp2pValues {
     options?: InitiateOptions
   ) => Promise<ProviderSettings>;
   authenticate?: (
-    autoGenerateProof?: AutoGenerateProofOptions
+    platform: string,
+    actionType: string,
+    options?: AuthenticateOptions
   ) => Promise<void>;
   authWebViewProps: React.ComponentProps<typeof InterceptWebView> | null;
   clearSession?: (options?: {
@@ -32,6 +34,7 @@ export interface Zkp2pValues {
     iosAlsoClearWebKitStore?: boolean;
   }) => Promise<void>;
   closeAuthWebView?: () => void;
+  resetState?: () => Promise<void>;
   generateProof?: (
     providerCfg: ProviderSettings,
     payload: NetworkEvent,
@@ -53,6 +56,7 @@ const Zkp2pContext = React.createContext<Zkp2pValues>({
   authWebViewProps: null,
   proofData: [],
   zkp2pClient: null,
+  resetState: undefined,
 });
 
 export default Zkp2pContext;

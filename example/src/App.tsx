@@ -45,6 +45,7 @@ function AppContent({
     flowState,
     metadataList,
     initiate,
+    authenticate,
     generateProof,
     proofData,
     zkp2pClient,
@@ -155,10 +156,11 @@ function AppContent({
     }
 
     if (currentScreen === 'auth') {
-      return initiate ? (
+      return initiate && authenticate ? (
         <AuthenticationScreen
           isAuthenticating={isAuthenticating}
-          startAuthentication={initiate}
+          initiate={initiate}
+          authenticate={authenticate}
           onGoBack={handleGoBack}
         />
       ) : (
@@ -183,7 +185,7 @@ function AppContent({
           authError={authError}
           zkp2pProviderConfig={zkp2pProviderConfig}
           interceptedPayload={interceptedPayload}
-          initiate={initiate}
+          authenticate={authenticate}
         />
       ) : (
         <View style={styles.center}>

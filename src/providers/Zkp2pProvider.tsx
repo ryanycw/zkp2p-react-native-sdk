@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
 } from 'react';
 import type { ReactNode } from 'react';
 
@@ -46,6 +47,7 @@ import {
   type ProofData,
   type FlowState,
   type InitiateOptions,
+  type AuthenticateOptions,
   type AutoGenerateProofOptions,
 } from '../types';
 
@@ -55,6 +57,7 @@ import type { GnarkBridge } from '../bridges/GnarkBridge';
 import { DEFAULT_USER_AGENT } from '../utils/constants';
 import { toDecimalString } from '../utils/format';
 import { parseReclaimProxyProof } from '../utils/reclaimProof';
+import { flowReducer, initialFlow } from './flowReducer';
 import {
   extractMetadata,
   preprocessBody,
@@ -215,6 +218,7 @@ const Zkp2pProvider = ({
   const spinAnimation = useRef(new Animated.Value(0)).current;
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const openAnimation = useRef(new Animated.Value(1)).current;
+  const sessionIdRef = useRef(0);
 
   // ==========================================================================
   // GNARK BRIDGE SETUP
@@ -239,11 +243,13 @@ const Zkp2pProvider = ({
 
   // Provider and flow state
   const [provider, setProvider] = useState<ProviderSettings | null>(null);
-  const [flowState, setFlowState] = useState<FlowState>('idle');
   const [rpcKey, setRpcKey] = useState(0);
 
-  // Authentication state
-  const [authError, setAuthError] = useState<Error | null>(null);
+  const [flow, dispatch] = useReducer(flowReducer, initialFlow);
+  const flowState: FlowState = flow.phase as FlowState;
+  const authError = flow.authError;
+  const proofError = flow.proofError;
+
   const [authWebViewProps, setAuthWebViewProps] = useState<React.ComponentProps<
     typeof InterceptWebView
   > | null>(null);
@@ -255,13 +261,16 @@ const Zkp2pProvider = ({
 
   // Proof generation state
   const [proofData, setProofData] = useState<ProofData[]>([]);
-  const [proofError, setProofError] = useState<Error | null>(null);
   const [lastProofItemIndex, setLastProofItemIndex] = useState<number>(0);
   const [autoGenerateOptions, setAutoGenerateOptions] =
     useState<AutoGenerateProofOptions | null>(null);
 
   // WebView state
   const [isWebViewMinimized, setIsWebViewMinimized] = useState(false);
+
+  useEffect(() => {
+    sessionIdRef.current = flow.session;
+  }, [flow.session]);
 
   // Cleanup effect for when component unmounts or prover changes
   useEffect(() => {
@@ -352,18 +361,19 @@ const Zkp2pProvider = ({
         const bodyJson = resolved.bodyJson ?? JSON.parse(resolved.bodyStr);
         setInterceptedPayload(resolved.updatedPayload);
         setMetadataList(extractMetadata(bodyJson, cfg));
-        setFlowState('authenticated');
+        dispatch({ type: 'AUTH_SUCCESS' });
         return true;
       } catch (e) {
         // Surface restore errors to caller (_authenticateInternal) to handle
         throw e;
       }
     },
-    [setInterceptedPayload, setMetadataList]
+    [setInterceptedPayload, setMetadataList, dispatch]
   );
 
   const _handleAuthIntercept = useCallback(
     async (evt: NetworkEvent, cfg: ProviderSettings) => {
+      const sid = sessionIdRef.current;
       const { metadata } = cfg;
       const primaryHit =
         evt.request.method === metadata.method &&
@@ -378,36 +388,41 @@ const Zkp2pProvider = ({
         return;
       }
 
-      await saveInterceptedPayload(cfg, evt);
-
       let itemExtractionError: Error | null = null;
 
       try {
-        // Build the replay target. On fallback hits, prefer replaying the matched URL
-        // (evt.response.url) instead of any configured metadataUrl override.
-        const target = {
-          url: fallbackHit
-            ? evt.response.url
-            : metadata.metadataUrl || evt.response.url,
-          method: fallbackHit
-            ? evt.request.method || 'GET'
-            : (metadata.metadataUrlMethod as any) ||
-              evt.request.method ||
-              'GET',
-          body:
-            !fallbackHit && metadata.metadataUrl
-              ? metadata.metadataUrlBody
-              : evt.request.body || undefined,
-        } as ReplayTarget;
-        const resolved = await replayAndResolve(
-          evt,
-          target,
-          getCustomUserAgent(cfg)
-        );
-        const jsonBody = resolved.bodyJson ?? JSON.parse(resolved.bodyStr);
-        const effectivePayload: NetworkEvent = resolved.updatedPayload;
+        let effectivePayload: NetworkEvent;
+        let jsonBody: any;
+
+        if (primaryHit) {
+          // Primary urlRegex hit: do not replay, use intercepted response as-is
+          const bodyStr = evt.response.body ?? '{}';
+          try {
+            jsonBody = JSON.parse(bodyStr);
+          } catch {
+            jsonBody = {};
+          }
+          effectivePayload = evt;
+          await saveInterceptedPayload(cfg, effectivePayload);
+        } else {
+          // Fallback urlRegex hit: replay against the matched URL
+          const target: ReplayTarget = {
+            url: evt.response.url,
+            method: (evt.request.method as any) || 'GET',
+            body: evt.request.body || undefined,
+          };
+          const resolved = await replayAndResolve(
+            evt,
+            target,
+            getCustomUserAgent(cfg)
+          );
+          jsonBody = resolved.bodyJson ?? JSON.parse(resolved.bodyStr);
+          effectivePayload = resolved.updatedPayload;
+          await saveInterceptedPayload(cfg, effectivePayload);
+        }
 
         const txs = extractMetadata(jsonBody, cfg);
+        if (sid !== sessionIdRef.current) return;
         setMetadataList(txs);
         setInterceptedPayload(effectivePayload);
 
@@ -420,28 +435,23 @@ const Zkp2pProvider = ({
 
         // Close webview and update state
         setAuthWebViewProps(null);
-        setFlowState('authenticated');
-        setAuthError(itemExtractionError);
+        dispatch({
+          type: 'AUTH_SUCCESS_WITH_ERROR',
+          error: itemExtractionError ?? null,
+        });
       } catch (err) {
         logger.error(
           '[zkp2p] failed to retrieve/process JSON body (via _handleAuthIntercept):',
           err
         );
+        if (sid !== sessionIdRef.current) return;
         setMetadataList([]);
         setInterceptedPayload(null);
-        setAuthError(err as Error);
+        dispatch({ type: 'AUTH_FAILURE', error: err as Error });
         setAuthWebViewProps(null);
-        if (flowState === 'authenticating') setFlowState('idle');
       }
     },
-    [
-      flowState,
-      setFlowState,
-      setMetadataList,
-      setInterceptedPayload,
-      setAuthWebViewProps,
-      setAuthError,
-    ]
+    [setMetadataList, setInterceptedPayload, setAuthWebViewProps, dispatch]
   );
 
   const _processInjectedScript = useCallback(
@@ -486,17 +496,20 @@ const Zkp2pProvider = ({
         onIntercept: (evt: NetworkEvent) => _handleAuthIntercept(evt, cfg),
         onError: (e: WebViewErrorEvent) => {
           logger.error('[zkp2p] Auth webview error:', e.nativeEvent);
-          setAuthError(new Error(String(e.nativeEvent?.description ?? e.type)));
+          dispatch({
+            type: 'SET_AUTH_ERROR',
+            error: new Error(String(e.nativeEvent?.description ?? e.type)),
+          });
           setAuthWebViewProps(null);
         },
       };
     },
-    [_handleAuthIntercept, setAuthError, setAuthWebViewProps]
+    [_handleAuthIntercept, setAuthWebViewProps, dispatch]
   );
 
   const _authenticateInternal = useCallback(
     async (cfg: ProviderSettings) => {
-      setFlowState('authenticating');
+      dispatch({ type: 'AUTH_OPEN' });
 
       try {
         const reused = await _restoreSessionWith(cfg);
@@ -506,7 +519,7 @@ const Zkp2pProvider = ({
         }
       } catch (err) {
         logger.warn('[zkp2p] Stored session invalid:', err);
-        setAuthError(err as Error);
+        dispatch({ type: 'SET_AUTH_ERROR', error: err as Error });
       }
 
       const webViewProps = _setupAuthWebViewProps(cfg);
@@ -523,12 +536,11 @@ const Zkp2pProvider = ({
     },
     [
       _restoreSessionWith,
-      setFlowState,
-      setAuthError,
       setAuthWebViewProps,
       _setupAuthWebViewProps,
       slideAnimation,
       openAnimation,
+      dispatch,
     ]
   );
 
@@ -538,7 +550,7 @@ const Zkp2pProvider = ({
       cfg: ProviderSettings,
       initialAction: NonNullable<InitiateOptions['initialAction']>
     ) => {
-      setFlowState('actionStarted');
+      dispatch({ type: 'ACTION_START' });
 
       // Apply template substitutions to URL and injection script
       let effectiveActionUrl = actionUrl;
@@ -592,9 +604,11 @@ const Zkp2pProvider = ({
             '[zkp2p] InitialAction WebView error:',
             e.nativeEvent?.description ?? e.type
           );
-          setAuthError(new Error(String(e.nativeEvent?.description ?? e.type)));
+          dispatch({
+            type: 'AUTH_FAILURE',
+            error: new Error(String(e.nativeEvent?.description ?? e.type)),
+          });
           setAuthWebViewProps(null);
-          setFlowState('idle');
         },
       });
       slideAnimation.setValue(0);
@@ -608,13 +622,12 @@ const Zkp2pProvider = ({
       }).start();
     },
     [
-      setFlowState,
       setAuthWebViewProps,
-      setAuthError,
       _authenticateInternal,
       _processInjectedScript,
       slideAnimation,
       openAnimation,
+      dispatch,
     ]
   );
 
@@ -624,7 +637,7 @@ const Zkp2pProvider = ({
       cfg: ProviderSettings,
       initialAction: NonNullable<InitiateOptions['initialAction']>
     ) => {
-      setFlowState('actionStarted');
+      dispatch({ type: 'ACTION_START' });
 
       // Apply template substitutions to URL
       let effectiveActionUrl = actionUrl;
@@ -657,12 +670,12 @@ const Zkp2pProvider = ({
               {
                 text: 'Cancel',
                 onPress: () => {
-                  setAuthError(
-                    new Error(
+                  dispatch({
+                    type: 'AUTH_FAILURE',
+                    error: new Error(
                       `Failed to open action URL: ${effectiveActionUrl}`
-                    )
-                  );
-                  setFlowState('idle');
+                    ),
+                  });
                 },
                 style: 'cancel',
               },
@@ -672,16 +685,18 @@ const Zkp2pProvider = ({
                   try {
                     await Linking.openURL(appStoreLink);
                     // Still set error state as the original action couldn't complete
-                    setAuthError(
-                      new Error(
+                    dispatch({
+                      type: 'AUTH_FAILURE',
+                      error: new Error(
                         'App not installed. Please install and try again.'
-                      )
-                    );
-                    setFlowState('idle');
+                      ),
+                    });
                   } catch (storeErr) {
                     logger.error('[zkp2p] Failed to open app store:', storeErr);
-                    setAuthError(new Error('Failed to open app store'));
-                    setFlowState('idle');
+                    dispatch({
+                      type: 'AUTH_FAILURE',
+                      error: new Error('Failed to open app store'),
+                    });
                   }
                 },
               },
@@ -690,14 +705,16 @@ const Zkp2pProvider = ({
           );
         } else {
           // No app store link available, just show error
-          setAuthError(
-            new Error(`Failed to open action URL: ${effectiveActionUrl}`)
-          );
-          setFlowState('idle');
+          dispatch({
+            type: 'AUTH_FAILURE',
+            error: new Error(
+              `Failed to open action URL: ${effectiveActionUrl}`
+            ),
+          });
         }
       }
     },
-    [setFlowState, setAuthError]
+    [dispatch]
   );
 
   const _handleInitialAction = useCallback(
@@ -871,15 +888,16 @@ const Zkp2pProvider = ({
       intentHash: string,
       itemIndex: number = 0
     ) => {
+      const sid = sessionIdRef.current;
       if (!payload) throw new Error('No authentication data');
       if (prover !== 'reclaim_snarkjs' && prover !== 'reclaim_gnark') {
         throw new Error(`Unsupported prover: ${prover}`);
       }
 
       logger.info('[zkp2p] Starting proof generation...');
-      setFlowState('proofGenerating');
+      if (sid !== sessionIdRef.current) return [];
+      dispatch({ type: 'PROOF_START' });
       setProofData([]);
-      setProofError(null);
       setLastProofItemIndex(itemIndex);
       try {
         // Preflight: ensure no native gnark tasks are lingering
@@ -957,6 +975,7 @@ const Zkp2pProvider = ({
           }
         });
 
+        if (sid !== sessionIdRef.current) return [] as any;
         const proof = parseReclaimProxyProof(res.response ?? null);
         const proofDataItem: ProofData = {
           proofType: 'reclaim',
@@ -1052,17 +1071,17 @@ const Zkp2pProvider = ({
           }
 
           setProofData(allProofs);
-          setFlowState('proofGeneratedSuccess');
+          dispatch({ type: 'PROOF_SUCCESS' });
           return allProofs;
         } else {
           // Single proof case
           setProofData([proofDataItem]);
-          setFlowState('proofGeneratedSuccess');
+          dispatch({ type: 'PROOF_SUCCESS' });
           return [proofDataItem];
         }
       } catch (err) {
-        setFlowState('proofGeneratedFailure');
-        setProofError(err as Error);
+        if (sid !== sessionIdRef.current) throw err;
+        dispatch({ type: 'PROOF_FAILURE', error: err as Error });
         throw err;
       } finally {
         setRpcKey((k) => k + 1);
@@ -1073,10 +1092,10 @@ const Zkp2pProvider = ({
       _rpcRequest,
       witnessUrl,
       prover,
-      setFlowState,
       setProofData,
       setRpcKey,
       gnarkBridge,
+      dispatch,
     ]
   );
 
@@ -1230,33 +1249,30 @@ const Zkp2pProvider = ({
       actionType: string,
       options: InitiateOptions = {}
     ): Promise<ProviderSettings> => {
-      const { existingProviderConfig, initialAction, autoGenerateProof } =
-        options;
+      // Start fresh session for this flow
+      dispatch({ type: 'NEW_SESSION' });
+      try {
+        const aborted = abortAllPending('New session (initiate)');
+        if (aborted > 0) {
+          logger.info('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
+        }
+      } catch {}
+      const { existingProviderConfig, initialAction } = options;
 
-      // Reset state
-      setAuthError(null);
+      // Reset flow data (errors are cleared by transitions ACTION_START/AUTH_OPEN)
       setMetadataList([]);
       setInterceptedPayload(null);
       setProofData([]);
-
-      // Set auto-generation options once at the beginning
-      // These will persist through the entire flow (action link → auth → proof)
-      if (autoGenerateProof) {
-        setAutoGenerateOptions(autoGenerateProof);
-      } else {
-        setAutoGenerateOptions(null);
-      }
 
       // Get provider configuration
       const cfg =
         existingProviderConfig ??
         (await _getOrFetchProviderConfig(platform, actionType, provider));
 
-      // Handle action link if it exists and skipAction is not true
+      // Handle action link if it exists
       const hasAnyActionLink =
-        (!!cfg.mobile?.internal?.actionLink ||
-          !!cfg.mobile?.external?.actionLink) &&
-        !options?.skipAction;
+        !!cfg.mobile?.internal?.actionLink ||
+        !!cfg.mobile?.external?.actionLink;
       if (hasAnyActionLink) {
         // If no initialAction provided, create default options
         const actionOptions = initialAction || { enabled: true };
@@ -1264,42 +1280,62 @@ const Zkp2pProvider = ({
         return cfg;
       }
 
-      // No action link or skipAction is true - proceed directly to authentication
-      await _authenticateInternal(cfg);
-
       return cfg;
     },
     [
       _getOrFetchProviderConfig,
       provider,
       _handleInitialAction,
-      _authenticateInternal,
-      setAuthError,
       setMetadataList,
       setInterceptedPayload,
+      abortAllPending,
+      dispatch,
     ]
   );
 
   /*
    * Authenticates the payment
-   * @dev This is called if config is already loaded in initiate() and user makes a payment external to
-   * the app. When user navigates back to the app, we can call this function to authenticate the payment.
+   * @dev This opens the auth webview and starts the authentication flow
    */
   const authenticate = useCallback(
-    async (autoGenerateProof?: AutoGenerateProofOptions) => {
-      if (!provider) {
-        throw new Error('Provider not initialized');
-      }
+    async (
+      platform: string,
+      actionType: string,
+      options: AuthenticateOptions = {}
+    ) => {
+      // Start new session and abort previous RPCs
+      dispatch({ type: 'NEW_SESSION' });
+      try {
+        const aborted = abortAllPending('New session (authenticate)');
+        if (aborted > 0) {
+          logger.info('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
+        }
+      } catch {}
 
-      // Only update auto-generation options if explicitly provided
-      // This allows manual authenticate() calls to override previous settings
+      // Ensure no stale state leaks into a new authentication flow
+      setProofData([]);
+      setMetadataList([]);
+      setInterceptedPayload(null);
+
+      const { existingProviderConfig, autoGenerateProof } = options;
+      const cfg =
+        existingProviderConfig ||
+        (await _getOrFetchProviderConfig(platform, actionType, provider));
+
       if (autoGenerateProof !== undefined) {
         setAutoGenerateOptions(autoGenerateProof || null);
       }
 
-      await _authenticateInternal(provider);
+      await _authenticateInternal(cfg);
     },
-    [provider, _authenticateInternal]
+    [
+      provider,
+      _getOrFetchProviderConfig,
+      _authenticateInternal,
+      abortAllPending,
+      dispatch,
+      setAutoGenerateOptions,
+    ]
   );
 
   /*
@@ -1315,6 +1351,7 @@ const Zkp2pProvider = ({
       setAuthWebViewProps(null);
       setIsWebViewMinimized(false);
       slideAnimation.setValue(0);
+      dispatch({ type: 'AUTH_CLOSE' });
     });
   };
 
@@ -1342,6 +1379,66 @@ const Zkp2pProvider = ({
     },
     []
   );
+
+  // ==========================================================================
+  // RESET STATE
+  // ==========================================================================
+  const resetState = useCallback(async () => {
+    try {
+      // Cancel native proofs and cleanup memory if using gnark
+      if (gnarkBridge) {
+        try {
+          await gnarkBridge.cancelAllProofs();
+        } catch (err) {
+          logger.error('[zkp2p] Error cancelling proofs during reset:', err);
+        }
+        try {
+          await gnarkBridge.cleanupMemory();
+        } catch (err) {
+          logger.error('[zkp2p] Error cleaning up memory during reset:', err);
+        }
+      }
+
+      // Abort any outstanding RPC promises and remount the RPC channel
+      const aborted = abortAllPending('Reset state');
+      if (aborted > 0) {
+        logger.info('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
+      }
+      setRpcKey((k) => k + 1);
+
+      // Reset in-memory state
+      setMetadataList([]);
+      setInterceptedPayload(null);
+      setProofData([]);
+      setAutoGenerateOptions(null);
+      setLastProofItemIndex(0);
+      setAuthWebViewProps(null);
+      setIsWebViewMinimized(false);
+      try {
+        slideAnimation.setValue(0);
+      } catch {}
+      try {
+        // Keep webview closed after reset
+        openAnimation.setValue(1);
+      } catch {}
+
+      // Reset flow reducer to initial
+      dispatch({ type: 'RESET' });
+    } catch (e) {
+      logger.error('[zkp2p] Error during resetState:', e);
+    }
+  }, [
+    gnarkBridge,
+    abortAllPending,
+    setMetadataList,
+    setInterceptedPayload,
+    setProofData,
+    setAuthWebViewProps,
+    setIsWebViewMinimized,
+    slideAnimation,
+    openAnimation,
+    dispatch,
+  ]);
 
   // ==========================================================================
   // COMPUTED STYLES
@@ -1415,7 +1512,7 @@ const Zkp2pProvider = ({
     } else if (flowState === 'proofGeneratedSuccess') {
       spinAnimation.setValue(0);
       const timer = setTimeout(() => {
-        setFlowState('idle');
+        dispatch({ type: 'AUTH_CLOSE' });
       }, 1000);
       return () => clearTimeout(timer);
     } else {
@@ -1452,6 +1549,7 @@ const Zkp2pProvider = ({
         proofData,
         zkp2pClient,
         clearSession,
+        resetState,
       }}
     >
       {children}
@@ -1520,8 +1618,7 @@ const Zkp2pProvider = ({
                   }
 
                   // Clean up state
-                  setFlowState('idle');
-                  setProofError(null);
+                  dispatch({ type: 'PROOF_DISMISS' });
 
                   // Clean up memory if using gnark
                   if (gnarkBridge) {
@@ -1641,7 +1738,7 @@ const Zkp2pProvider = ({
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.closeButton}
-                    onPress={() => setFlowState('idle')}
+                    onPress={() => dispatch({ type: 'PROOF_DISMISS' })}
                   >
                     <Text style={styles.closeButtonText}>Close</Text>
                   </TouchableOpacity>

@@ -28,6 +28,7 @@ export type {
   ProofData,
   FlowState,
   InitiateOptions,
+  AuthenticateOptions,
   AutoGenerateProofOptions,
   SignalIntentParams,
   FulfillIntentParams,

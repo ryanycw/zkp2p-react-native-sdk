@@ -6,41 +6,48 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from 'react-native';
 import type {
   ProviderSettings,
   InitiateOptions as SDKInitiateOptions,
+  AuthenticateOptions as SDKAuthenticateOptions,
 } from '../../../src/';
 import { useZkp2p } from '../../../src/';
 
 interface Props {
   isAuthenticating: boolean;
-  startAuthentication: (
+  initiate: (
     platform: string,
     actionType: string,
     options?: SDKInitiateOptions
   ) => Promise<ProviderSettings>;
+  authenticate: (
+    platform: string,
+    actionType: string,
+    options?: SDKAuthenticateOptions
+  ) => Promise<void>;
   onGoBack: () => void;
 }
 
 export const AuthenticationScreen: React.FC<Props> = ({
   isAuthenticating,
-  startAuthentication,
+  initiate,
+  authenticate,
   onGoBack,
 }) => {
   const [activePlatform, setActivePlatform] = useState<string | null>(null);
   const [autoProofEnabled, setAutoProofEnabled] = useState(false);
-  const { clearSession } = useZkp2p();
+  const { clearSession, resetState } = useZkp2p();
 
   const handleSelect = async (platform: string, action: string) => {
     setActivePlatform(platform);
     try {
-      // Only Wise and Mercado Pago require the action step (opening external app/link)
-      // All other platforms can skip directly to authentication
-      const shouldSkipAction =
-        platform !== 'wise' && platform !== 'mercadopago';
+      // Wise and Mercado Pago: still use initiate (action step first)
+      // Others: use authenticate() directly
+      const useAuthenticate = platform !== 'wise' && platform !== 'mercadopago';
 
-      const authOptions: SDKInitiateOptions = {
+      const authOptions: SDKAuthenticateOptions = {
         autoGenerateProof: autoProofEnabled
           ? {
               intentHash:
@@ -54,31 +61,33 @@ export const AuthenticationScreen: React.FC<Props> = ({
               },
             }
           : undefined,
-        skipAction: shouldSkipAction,
       };
 
+      let initiateOptions: SDKInitiateOptions = {};
+
       // Add initialAction with URL variables for platforms that need them (Wise and Mercado Pago)
-      if (!shouldSkipAction) {
-        authOptions.initialAction = {};
+      if (!useAuthenticate) {
+        initiateOptions.initialAction = {};
 
         // Add paymentDetails for MercadoPago to enable auto-fill
         if (platform === 'mercadopago') {
-          authOptions.initialAction.paymentDetails = {
+          initiateOptions.initialAction.paymentDetails = {
             RECIPIENT_ID: '0720000791240000001234',
             AMOUNT: '100',
           };
         }
 
         if (platform === 'wise') {
-          authOptions.initialAction.paymentDetails = {
+          initiateOptions.initialAction.paymentDetails = {
             RECIPIENT_ID: 'alexanders6341',
           };
-          authOptions.skipAction = true;
         }
       }
 
-      if (startAuthentication) {
-        await startAuthentication(platform, action, authOptions);
+      if (useAuthenticate && authenticate) {
+        await authenticate(platform, action, authOptions);
+      } else if (initiate) {
+        await initiate(platform, action, initiateOptions);
       }
     } finally {
       setActivePlatform(null);
@@ -90,179 +99,200 @@ export const AuthenticationScreen: React.FC<Props> = ({
       <TouchableOpacity onPress={onGoBack} style={styles.backButton}>
         <Text style={styles.backButtonText}>‹ Back</Text>
       </TouchableOpacity>
-      <Text style={styles.title}>Select Platform</Text>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.title}>Select Platform</Text>
 
-      <View style={styles.toggleContainer}>
-        <Text style={styles.toggleLabel}>Auto-generate proof:</Text>
+        <View style={styles.toggleContainer}>
+          <Text style={styles.toggleLabel}>Auto-generate proof:</Text>
+          <TouchableOpacity
+            style={[styles.toggle, autoProofEnabled && styles.toggleActive]}
+            onPress={() => setAutoProofEnabled(!autoProofEnabled)}
+          >
+            <Text style={styles.toggleText}>
+              {autoProofEnabled ? 'ON' : 'OFF'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity
-          style={[styles.toggle, autoProofEnabled && styles.toggleActive]}
-          onPress={() => setAutoProofEnabled(!autoProofEnabled)}
+          style={[styles.button, styles.clearButton]}
+          onPress={async () => {
+            try {
+              await clearSession?.();
+              Alert.alert('Session Cleared', 'All cookies have been cleared.');
+            } catch (e) {
+              console.error('Failed to clear session', e);
+              Alert.alert('Error', 'Failed to clear cookies.');
+            }
+          }}
         >
-          <Text style={styles.toggleText}>
-            {autoProofEnabled ? 'ON' : 'OFF'}
-          </Text>
+          <Text style={styles.buttonText}>Clear Cookies (Force Login)</Text>
         </TouchableOpacity>
-      </View>
 
-      <TouchableOpacity
-        style={[styles.button, styles.clearButton]}
-        onPress={async () => {
-          try {
-            await clearSession?.();
-            Alert.alert('Session Cleared', 'All cookies have been cleared.');
-          } catch (e) {
-            console.error('Failed to clear session', e);
-            Alert.alert('Error', 'Failed to clear cookies.');
-          }
-        }}
-      >
-        <Text style={styles.buttonText}>Clear Cookies (Force Login)</Text>
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.button, styles.clearButton]}
+          onPress={async () => {
+            try {
+              await resetState?.();
+              Alert.alert('SDK Reset', 'Internal SDK state has been reset.');
+            } catch (e) {
+              console.error('Failed to reset SDK state', e);
+              Alert.alert('Error', 'Failed to reset SDK state.');
+            }
+          }}
+        >
+          <Text style={styles.buttonText}>Reset SDK State</Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          isAuthenticating && activePlatform === 'venmo' && styles.disabled,
-        ]}
-        disabled={isAuthenticating && activePlatform === 'venmo'}
-        onPress={() => handleSelect('venmo', 'transfer_venmo')}
-      >
-        {isAuthenticating && activePlatform === 'venmo' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Venmo</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isAuthenticating && activePlatform === 'venmo' && styles.disabled,
+          ]}
+          disabled={isAuthenticating && activePlatform === 'venmo'}
+          onPress={() => handleSelect('venmo', 'transfer_venmo')}
+        >
+          {isAuthenticating && activePlatform === 'venmo' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Venmo</Text>
+          )}
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          isAuthenticating && activePlatform === 'revolut' && styles.disabled,
-        ]}
-        disabled={isAuthenticating && activePlatform === 'revolut'}
-        onPress={() => handleSelect('revolut', 'transfer_revolut')}
-      >
-        {isAuthenticating && activePlatform === 'revolut' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Revolut</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isAuthenticating && activePlatform === 'revolut' && styles.disabled,
+          ]}
+          disabled={isAuthenticating && activePlatform === 'revolut'}
+          onPress={() => handleSelect('revolut', 'transfer_revolut')}
+        >
+          {isAuthenticating && activePlatform === 'revolut' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Revolut</Text>
+          )}
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          isAuthenticating && activePlatform === 'chase' && styles.disabled,
-        ]}
-        disabled={isAuthenticating && activePlatform === 'chase'}
-        onPress={() => handleSelect('chase', 'transfer_zelle')}
-      >
-        {isAuthenticating && activePlatform === 'chase' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Chase (Zelle)</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isAuthenticating && activePlatform === 'chase' && styles.disabled,
+          ]}
+          disabled={isAuthenticating && activePlatform === 'chase'}
+          onPress={() => handleSelect('chase', 'transfer_zelle')}
+        >
+          {isAuthenticating && activePlatform === 'chase' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Chase (Zelle)</Text>
+          )}
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          isAuthenticating &&
-            activePlatform === 'bankofamerica' &&
-            styles.disabled,
-        ]}
-        disabled={isAuthenticating && activePlatform === 'bankofamerica'}
-        onPress={() => handleSelect('bankofamerica', 'transfer_zelle')}
-      >
-        {isAuthenticating && activePlatform === 'bankofamerica' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Bank of America (Zelle)</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isAuthenticating &&
+              activePlatform === 'bankofamerica' &&
+              styles.disabled,
+          ]}
+          disabled={isAuthenticating && activePlatform === 'bankofamerica'}
+          onPress={() => handleSelect('bankofamerica', 'transfer_zelle')}
+        >
+          {isAuthenticating && activePlatform === 'bankofamerica' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Bank of America (Zelle)</Text>
+          )}
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          isAuthenticating && activePlatform === 'citi' && styles.disabled,
-        ]}
-        disabled={isAuthenticating && activePlatform === 'citi'}
-        onPress={() => handleSelect('citi', 'transfer_zelle')}
-      >
-        {isAuthenticating && activePlatform === 'citi' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Citibank (Zelle)</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isAuthenticating && activePlatform === 'citi' && styles.disabled,
+          ]}
+          disabled={isAuthenticating && activePlatform === 'citi'}
+          onPress={() => handleSelect('citi', 'transfer_zelle')}
+        >
+          {isAuthenticating && activePlatform === 'citi' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Citibank (Zelle)</Text>
+          )}
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          isAuthenticating &&
-            activePlatform === 'mercadopago' &&
-            styles.disabled,
-        ]}
-        disabled={isAuthenticating && activePlatform === 'mercadopago'}
-        onPress={() => handleSelect('mercadopago', 'transfer_mercado_pago')}
-      >
-        {isAuthenticating && activePlatform === 'mercadopago' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Mercado Pago</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isAuthenticating &&
+              activePlatform === 'mercadopago' &&
+              styles.disabled,
+          ]}
+          disabled={isAuthenticating && activePlatform === 'mercadopago'}
+          onPress={() => handleSelect('mercadopago', 'transfer_mercado_pago')}
+        >
+          {isAuthenticating && activePlatform === 'mercadopago' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Mercado Pago</Text>
+          )}
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          isAuthenticating && activePlatform === 'wise' && styles.disabled,
-        ]}
-        disabled={isAuthenticating && activePlatform === 'wise'}
-        onPress={() => handleSelect('wise', 'transfer_wise')}
-      >
-        {isAuthenticating && activePlatform === 'wise' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Wise</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isAuthenticating && activePlatform === 'wise' && styles.disabled,
+          ]}
+          disabled={isAuthenticating && activePlatform === 'wise'}
+          onPress={() => handleSelect('wise', 'transfer_wise')}
+        >
+          {isAuthenticating && activePlatform === 'wise' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Wise</Text>
+          )}
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          isAuthenticating && activePlatform === 'cashapp' && styles.disabled,
-        ]}
-        disabled={isAuthenticating && activePlatform === 'cashapp'}
-        onPress={() => handleSelect('cashapp', 'transfer_cashapp')}
-      >
-        {isAuthenticating && activePlatform === 'cashapp' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Cash App</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isAuthenticating && activePlatform === 'cashapp' && styles.disabled,
+          ]}
+          disabled={isAuthenticating && activePlatform === 'cashapp'}
+          onPress={() => handleSelect('cashapp', 'transfer_cashapp')}
+        >
+          {isAuthenticating && activePlatform === 'cashapp' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Cash App</Text>
+          )}
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          isAuthenticating && activePlatform === 'luxon' && styles.disabled,
-        ]}
-        disabled={isAuthenticating && activePlatform === 'luxon'}
-        onPress={() => handleSelect('luxon', 'transfer_luxon')}
-      >
-        {isAuthenticating && activePlatform === 'luxon' ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Luxon</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isAuthenticating && activePlatform === 'luxon' && styles.disabled,
+          ]}
+          disabled={isAuthenticating && activePlatform === 'luxon'}
+          onPress={() => handleSelect('luxon', 'transfer_luxon')}
+        >
+          {isAuthenticating && activePlatform === 'luxon' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Luxon</Text>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: '#f5f5f5' },
+  scrollContent: { paddingBottom: 40 },
   title: {
     fontSize: 24,
     fontWeight: 'bold',

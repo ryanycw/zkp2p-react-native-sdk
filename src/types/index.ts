@@ -27,8 +27,12 @@ export interface InitiateOptions {
   authOverrides?: AuthWVOverrides;
   existingProviderConfig?: ProviderSettings;
   initialAction?: InitialActionOptions;
+}
+
+export interface AuthenticateOptions {
+  authOverrides?: AuthWVOverrides;
+  existingProviderConfig?: ProviderSettings;
   autoGenerateProof?: AutoGenerateProofOptions; // true for defaults, object for custom config
-  skipAction?: boolean; // Skip action step and go straight to authentication
 }
 
 export type {

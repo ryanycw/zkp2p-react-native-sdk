@@ -131,60 +131,54 @@ const provider = await initiate('venmo', 'transfer_venmo', {
       RECIPIENT_ID: 'john-doe-123',
       AMOUNT: '100'
     }
-  },
-  // Optional: Auto-generate proof after authentication
-  autoGenerateProof: {
-    intentHash: '0x...', // Your intent hash from signalIntent
-    itemIndex: 0, // Which transaction to prove (default: 0)
-    onProofGenerated: (proofData) => {
-      console.log('Proof generated:', proofData);
-    },
-    onProofError: (error) => {
-      console.error('Proof generation failed:', error);
-    }
   }
 });
 ```
 
 #### 3. `generateProof(provider, payload, intentHash, itemIndex?)`
-Generate a zero-knowledge proof for a specific transaction.
+Generate zero-knowledge proof(s) for a specific transaction. Always returns an array of `ProofData`.
 
 ```typescript
 const { generateProof, provider, interceptedPayload } = useZkp2p();
 
 try {
-  const proof = await generateProof(
+  const proofs = await generateProof(
     provider,
     interceptedPayload,
     '0x...', // Intent hash from signalIntent
     0 // Transaction index to prove
   );
   
-  console.log('Proof generated:', proof);
+  console.log('Proofs generated:', proofs);
 } catch (error) {
   console.error('Proof generation failed:', error);
   // Fallback to manual authentication
-  await authenticate();
+  await authenticate('venmo', 'transfer_venmo');
 }
 ```
 
-#### 4. `authenticate(autoGenerateProof?)`
-Manually trigger authentication flow. Useful for retry scenarios or fallback.
+#### 4. `authenticate(platform, actionType, options?)`
+Start or retry the authentication flow for a specific provider. Useful for retry or manual flows.
 
 ```typescript
 const { authenticate } = useZkp2p();
 
 // Simple authentication without auto-proof
-await authenticate();
+await authenticate('venmo', 'transfer_venmo');
 
 // Or with auto-proof generation
-await authenticate({
-  intentHash: '0x...',
-  itemIndex: 0,
-  onProofGenerated: (proofData) => {
-    // Handle generated proof
-  }
+await authenticate('venmo', 'transfer_venmo', {
+  autoGenerateProof: {
+    intentHash: '0x...',
+    itemIndex: 0,
+    onProofGenerated: (proofData) => {
+      // Handle generated proof
+    },
+    onProofError: (err) => console.error(err),
+  },
 });
+
+Note: Both `initiate(...)` and `authenticate(...)` start a new session and clear `proofData`, `metadataList`, and `interceptedPayload` to ensure no stale state carries into the new flow.
 ```
 
 #### 5. `fulfillIntent(args)`
@@ -206,14 +200,17 @@ const {
   proofData,           // Generated proof data (ProofData[])
   metadataList,        // List of transactions from authentication
   authError,           // Authentication error if any
+  proofError,          // Proof generation error if any
   interceptedPayload,  // Network event data from authentication
   authWebViewProps,    // Props for the authentication WebView
   
   // Methods
   initiate,            // Start the flow
   authenticate,        // Manual authentication
-  generateProof,       // Generate proof for transaction (returns ProofData[])
+  generateProof,       // Generate proof(s) for transaction (returns ProofData[])
   closeAuthWebView,    // Close authentication modal
+  clearSession,        // Clear cookies/storage for a fresh login
+  resetState,          // Reset in-memory SDK state and cancel background work
   
   // Client
   zkp2pClient,         // Direct access to contract methods (null in proof-only mode)
@@ -256,39 +253,42 @@ function BuyCrypto() {
             amount: '100.00'
           }
         },
-        // Optional: Auto-generate proof after authentication
+        // Optional: After authenticate step, you can auto-generate proof
+        // (Recommended to pass autoGenerateProof in authenticate instead.)
+      });
+      
+      // Example: Manually authenticate and auto-generate proof
+      await authenticate('venmo', 'transfer_venmo', {
         autoGenerateProof: {
           intentHash,
-          itemIndex: 0, // Select the latest transaction
-          onProofGenerated: async (proof) => {
+          itemIndex: 0,
+          onProofGenerated: async (_singleProof) => {
+            // For multiple-proof configs, read the array from the hook state
+            const proofsToUse = proofData && proofData.length > 0 ? proofData : [];
+            if (proofsToUse.length === 0) return;
             const fulfillTx = await zkp2pClient.fulfillIntent({
-              paymentProof: proof,
+              paymentProofs: proofsToUse,
               intentHash,
-              onSuccess: (tx) => {
-                console.log('Transaction complete:', tx.hash);
-              },
-              onError: (error) => {
-                console.error('Fulfillment failed:', error);
+              onSuccess: (tx) => console.log('Transaction complete:', tx.hash),
+              onError: (error) => console.error('Fulfillment failed:', error),
             });
-            
             console.log('Transaction complete:', fulfillTx.hash);
           },
           onProofError: async (error) => {
             console.error('Auto-proof failed, trying manual:', error);
-            
-            // Fallback: Manual proof generation
             if (provider && interceptedPayload) {
-              const proof = await generateProof(
+              const proofs = await generateProof(
                 provider,
                 interceptedPayload,
                 intentHash,
                 0
               );
+              await zkp2pClient.fulfillIntent({ paymentProofs: proofs, intentHash });
             }
-          }
-        }
+          },
+        },
       });
-      
+
     } catch (error) {
       console.error('Buy flow failed:', error);
     }
@@ -396,6 +396,16 @@ The SDK includes native gnark proving for optimal performance. Circuit files are
 - `cleanupMemory()` — cancels all active tasks and frees resources.
 - Event: `GnarkRPCResponse` — payload includes `id`, `type` (`response`|`error`), and `response` or `error`.
 
+### Resetting SDK State
+
+- `resetState()` — Resets internal SDK state and cancels background proof tasks:
+  - Cancels all active native gnark proofs and cleans up memory
+  - Aborts pending RPC requests and remounts the RPC bridge
+  - Clears `proofData`, `metadataList`, `interceptedPayload`
+  - Closes/minimizes auth webview and resets flow to `idle`
+
+- `clearSession(options?)` — Clears persisted cookies/storage used for web auth. Use this to force fresh logins. It does not cancel native tasks by itself.
+
 ## UI Components
 
 ### Authentication WebView
@@ -473,16 +483,27 @@ interface InitiateOptions {
   existingProviderConfig?: ProviderSettings;
   initialAction?: {
     enabled?: boolean;
-    paymentDetails?: Record<string, string>; // Generic details for both URL and JS injection
-    useExternalActionOverride?: boolean; // Runtime override for internal vs external action preference
+    paymentDetails?: Record<string, string>; // For URL/JS injection
+    useExternalActionOverride?: boolean; // Override internal vs external action
   };
+}
+
+// Authenticate options
+interface AuthenticateOptions {
+  authOverrides?: AuthWVOverrides;
+  existingProviderConfig?: ProviderSettings;
   autoGenerateProof?: {
     intentHash?: string;
     itemIndex?: number;
     onProofGenerated?: (proofData: ProofData) => void;
     onProofError?: (error: Error) => void;
   };
-  skipAction?: boolean;
+}
+
+// Fulfill intent params (subset)
+interface FulfillIntentParams {
+  paymentProofs: ProofData[];
+  intentHash: string;
 }
 ```
 

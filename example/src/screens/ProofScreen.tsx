@@ -40,11 +40,11 @@ interface CombinedScreenProps {
   authError: Error | null;
   zkp2pProviderConfig: ProviderSettings | null;
   interceptedPayload: NetworkEvent | null;
-  initiate?: (
+  authenticate?: (
     platform: string,
     actionType: string,
     options?: any
-  ) => Promise<ProviderSettings>;
+  ) => Promise<void>;
 }
 
 export const ProofScreen: React.FC<CombinedScreenProps> = ({
@@ -56,7 +56,7 @@ export const ProofScreen: React.FC<CombinedScreenProps> = ({
   authError,
   zkp2pProviderConfig,
   interceptedPayload,
-  initiate,
+  authenticate,
 }) => {
   const [selectedItemForProof, setSelectedItemForProof] =
     useState<ExtractedMetadataList | null>(null);
@@ -188,7 +188,7 @@ export const ProofScreen: React.FC<CombinedScreenProps> = ({
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Transactions & Proof</Text>
-        {initiate && zkp2pProviderConfig && (
+        {zkp2pProviderConfig && (
           <TouchableOpacity
             onPress={async () => {
               // Re-authenticate with the same provider config
@@ -196,10 +196,11 @@ export const ProofScreen: React.FC<CombinedScreenProps> = ({
               const platform = zkp2pProviderConfig.metadata.platform;
               const actionType = zkp2pProviderConfig.actionType;
               try {
-                await initiate(platform, actionType, {
-                  existingProviderConfig: zkp2pProviderConfig,
-                  skipAction: true, // Skip the action step, go directly to auth
-                });
+                if (authenticate) {
+                  await authenticate(platform, actionType, {
+                    existingProviderConfig: zkp2pProviderConfig,
+                  });
+                }
               } catch (error) {
                 console.error('[ProofScreen] Refresh failed:', error);
               }
