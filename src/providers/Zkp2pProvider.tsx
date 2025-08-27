@@ -508,8 +508,16 @@ const Zkp2pProvider = ({
   );
 
   const _authenticateInternal = useCallback(
-    async (cfg: ProviderSettings) => {
+    async (
+      cfg: ProviderSettings,
+      autoGenerateProof?: AutoGenerateProofOptions | null
+    ) => {
       dispatch({ type: 'AUTH_OPEN' });
+
+      // Set auto-generate options if provided
+      if (autoGenerateProof !== undefined) {
+        setAutoGenerateOptions(autoGenerateProof);
+      }
 
       try {
         const reused = await _restoreSessionWith(cfg);
@@ -541,6 +549,7 @@ const Zkp2pProvider = ({
       slideAnimation,
       openAnimation,
       dispatch,
+      setAutoGenerateOptions,
     ]
   );
 
@@ -548,7 +557,8 @@ const Zkp2pProvider = ({
     async (
       actionUrl: string,
       cfg: ProviderSettings,
-      initialAction: NonNullable<InitiateOptions['initialAction']>
+      initialAction: NonNullable<InitiateOptions['initialAction']>,
+      autoGenerateProof?: AutoGenerateProofOptions | null
     ) => {
       dispatch({ type: 'ACTION_START' });
 
@@ -596,7 +606,7 @@ const Zkp2pProvider = ({
             )
           ) {
             // Navigate to authentication phase
-            await _authenticateInternal(cfg);
+            await _authenticateInternal(cfg, autoGenerateProof);
           }
         },
         onError: (e: WebViewErrorEvent) => {
@@ -720,7 +730,8 @@ const Zkp2pProvider = ({
   const _handleInitialAction = useCallback(
     async (
       cfg: ProviderSettings,
-      initialAction: NonNullable<InitiateOptions['initialAction']>
+      initialAction: NonNullable<InitiateOptions['initialAction']>,
+      autoGenerateProof?: AutoGenerateProofOptions | null
     ) => {
       const internalUrl = cfg.mobile?.internal?.actionLink;
       const externalUrl = cfg.mobile?.external?.actionLink;
@@ -734,7 +745,12 @@ const Zkp2pProvider = ({
 
       const runInternal = async () => {
         if (!internalUrl) return false;
-        await _handleHttpActionInWebView(internalUrl, cfg, initialAction);
+        await _handleHttpActionInWebView(
+          internalUrl,
+          cfg,
+          initialAction,
+          autoGenerateProof
+        );
         return true;
       };
 
@@ -1257,7 +1273,8 @@ const Zkp2pProvider = ({
           logger.info('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
         }
       } catch {}
-      const { existingProviderConfig, initialAction } = options;
+      const { existingProviderConfig, initialAction, autoGenerateProof } =
+        options;
 
       // Reset flow data (errors are cleared by transitions ACTION_START/AUTH_OPEN)
       setMetadataList([]);
@@ -1276,7 +1293,11 @@ const Zkp2pProvider = ({
       if (hasAnyActionLink) {
         // If no initialAction provided, create default options
         const actionOptions = initialAction || { enabled: true };
-        await _handleInitialAction(cfg, actionOptions);
+        await _handleInitialAction(
+          cfg,
+          actionOptions,
+          autoGenerateProof || null
+        );
         return cfg;
       }
 
@@ -1322,11 +1343,7 @@ const Zkp2pProvider = ({
         existingProviderConfig ||
         (await _getOrFetchProviderConfig(platform, actionType, provider));
 
-      if (autoGenerateProof !== undefined) {
-        setAutoGenerateOptions(autoGenerateProof || null);
-      }
-
-      await _authenticateInternal(cfg);
+      await _authenticateInternal(cfg, autoGenerateProof || null);
     },
     [
       provider,
@@ -1334,7 +1351,6 @@ const Zkp2pProvider = ({
       _authenticateInternal,
       abortAllPending,
       dispatch,
-      setAutoGenerateOptions,
     ]
   );
 

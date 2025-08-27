@@ -27,6 +27,7 @@ export interface InitiateOptions {
   authOverrides?: AuthWVOverrides;
   existingProviderConfig?: ProviderSettings;
   initialAction?: InitialActionOptions;
+  autoGenerateProof?: AutoGenerateProofOptions;
 }
 
 export interface AuthenticateOptions {
