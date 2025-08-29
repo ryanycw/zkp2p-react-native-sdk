@@ -29,6 +29,8 @@ import type {
   GetOwnerDepositsResponse,
   GetIntentsByTakerRequest,
   GetIntentsByTakerResponse,
+  GetDepositsOrderStatsRequest,
+  GetDepositsOrderStatsResponse,
 } from './types';
 import { fulfillIntent } from './actions/fulfillIntent';
 import { signalIntent } from './actions/signalIntent';
@@ -39,6 +41,7 @@ import {
   apiValidatePayeeDetails,
   apiGetOwnerDeposits,
   apiGetIntentsByTaker,
+  apiGetDepositsOrderStats,
 } from './adapters/api';
 import { withdrawDeposit } from './actions/withdrawDeposit';
 import { cancelIntent } from './actions/cancelIntent';
@@ -257,6 +260,16 @@ export class Zkp2pClient {
     params: GetIntentsByTakerRequest
   ): Promise<GetIntentsByTakerResponse> {
     return apiGetIntentsByTaker(params, this.apiKey, this.baseApiUrl);
+  }
+
+  /**
+   * Get order statistics for multiple deposits.
+   * Returns statistics including total, fulfilled, cancelled, released, expired, and created order counts and amounts.
+   */
+  async getDepositsOrderStats(
+    params: GetDepositsOrderStatsRequest
+  ): Promise<GetDepositsOrderStatsResponse> {
+    return apiGetDepositsOrderStats(params, this.apiKey, this.baseApiUrl);
   }
 
   /**
