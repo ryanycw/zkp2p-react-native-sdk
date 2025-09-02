@@ -223,6 +223,9 @@ export type QuoteSingleResponse = {
   payeeAddress: string;
   conversionRate: string;
   intent: QuoteIntentResponse;
+  payeeData?: {
+    [key: string]: string;
+  };
 };
 
 export type QuoteFeesResponse = {
