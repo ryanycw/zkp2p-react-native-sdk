@@ -188,6 +188,25 @@ export function buildHeadersToSend(
   return out;
 }
 
+// Build an in-page XHR replay script for WebView injection
+export function buildInPageReplayScript(params: {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body?: string | undefined;
+}): string {
+  const { url, method, headers, body } = params;
+  const send =
+    method.toUpperCase() === 'GET'
+      ? 'xhr.send();'
+      : `xhr.send(${body ? JSON.stringify(body) : 'null'});`;
+  return `(() => { try { var xhr = new XMLHttpRequest(); xhr.open(${JSON.stringify(
+    method
+  )}, ${JSON.stringify(url)}, true); xhr.withCredentials = true; var hdrs = ${JSON.stringify(
+    headers
+  )}; try { for (var k in hdrs) { if (hdrs.hasOwnProperty(k)) { try { xhr.setRequestHeader(k, hdrs[k]); } catch(e){} } } } catch(e){} xhr.onload = function(){}; xhr.onerror = function(){}; ${send} } catch(e){} true; })();`;
+}
+
 // Build param values by applying each selector with getParamValue
 export function buildParamValues(
   cfg: ProviderSettings,

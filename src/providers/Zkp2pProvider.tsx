@@ -62,6 +62,7 @@ import {
   extractMetadata,
   preprocessBody,
   buildHeadersToSend,
+  buildInPageReplayScript,
   buildParamValues,
   buildSecretParams,
   saveInterceptedPayload,
@@ -214,6 +215,7 @@ const Zkp2pProvider = ({
   // ==========================================================================
 
   const rpcWebViewRef = useRef<WebView>(null);
+  const authWebViewRef = useRef<WebView>(null);
   const pending = useRef<Record<string, PendingEntry>>({});
   const spinAnimation = useRef(new Animated.Value(0)).current;
   const slideAnimation = useRef(new Animated.Value(0)).current;
@@ -405,20 +407,33 @@ const Zkp2pProvider = ({
           effectivePayload = evt;
           await saveInterceptedPayload(cfg, effectivePayload);
         } else {
-          // Fallback urlRegex hit: replay against the matched URL
-          const target: ReplayTarget = {
-            url: evt.response.url,
-            method: (evt.request.method as any) || 'GET',
-            body: evt.request.body || undefined,
-          };
-          const resolved = await replayAndResolve(
-            evt,
-            target,
-            getCustomUserAgent(cfg)
-          );
-          jsonBody = resolved.bodyJson ?? JSON.parse(resolved.bodyStr);
-          effectivePayload = resolved.updatedPayload;
-          await saveInterceptedPayload(cfg, effectivePayload);
+          // Fallback urlRegex hit: perform an in-page XHR to metadataUrl (or cfg.url)
+          const url = cfg.metadata.metadataUrl || cfg.url;
+          const method =
+            (cfg.metadata.metadataUrlMethod as any) ||
+            (cfg.method as any) ||
+            'GET';
+          const body = cfg.metadata.metadataUrl
+            ? cfg.metadata.metadataUrlBody
+            : cfg.body || undefined;
+
+          const headersObject =
+            (evt.request.headers as Record<string, string>) || {};
+
+          const js = buildInPageReplayScript({
+            url,
+            method,
+            headers: headersObject,
+            body,
+          });
+
+          try {
+            authWebViewRef.current?.injectJavaScript?.(js);
+          } catch (e) {
+            logger.warn('[zkp2p] In-page fallback replay injection failed:', e);
+          }
+          // The metadataUrl response will be intercepted and handled in a subsequent call
+          return;
         }
 
         const txs = extractMetadata(jsonBody, cfg);
@@ -827,8 +842,6 @@ const Zkp2pProvider = ({
 
   const _onRpcMessage = useCallback((e: WebViewMessageEvent) => {
     try {
-      // The RPCWebView now filters console logs, but we keep this as a safeguard.
-      // It also filters ZK function calls, so we only expect responses here.
       const data = JSON.parse(e.nativeEvent.data);
 
       // Early exit for any non-attestor-core messages that might slip through
@@ -1599,6 +1612,7 @@ const Zkp2pProvider = ({
               ]}
             >
               <InterceptWebView
+                ref={authWebViewRef}
                 {...authWebViewProps}
                 style={styles.nativeWebview}
               />
