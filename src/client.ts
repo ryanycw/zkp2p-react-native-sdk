@@ -70,6 +70,8 @@ export class Zkp2pClient {
     wise: Address;
     mercadopago: Address;
     zelle: Address;
+    paypal: Address;
+    monzo: Address;
     gatingService: Address;
     zkp2pWitnessSigner: Address;
   };
@@ -131,6 +133,8 @@ export class Zkp2pClient {
       wise: contractAddresses.wise,
       mercadopago: contractAddresses.mercadopago,
       zelle: contractAddresses.zelle,
+      paypal: contractAddresses.paypal,
+      monzo: contractAddresses.monzo,
       gatingService: contractAddresses.gatingService,
       zkp2pWitnessSigner: contractAddresses.zkp2pWitnessSigner,
     };
