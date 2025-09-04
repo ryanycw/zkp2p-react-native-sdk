@@ -135,22 +135,39 @@ dependencies {
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4"
 }
 
-// NOTE: Circuit files need to be copied to the app's assets, not the library's assets
-// This task is for development/testing purposes only
-// Apps using this library should copy the gnark-circuits files to their own assets
+// NOTE: Circuit files are auto-packaged with the library's assets.
+// This task copies gnark-circuits into the library so they are merged
+// into the consuming app's assets at build time (no app action needed).
+// If you need custom circuits, you can override by copying into the app's
+// assets (see example/android/app/build.gradle).
 task copyGnarkCircuits(type: Copy) {
-  from file("${project.rootDir}/../gnark-circuits")
+  // Prefer the package-local gnark-circuits directory when this library
+  // is consumed from node_modules. This resolves to
+  // node_modules/@zkp2p/zkp2p-react-native-sdk/gnark-circuits
+  def pkgCircuitsDir = file("${projectDir}/../gnark-circuits")
+
+  // Fallback: when developing inside the monorepo, allow copying from repo root
+  def repoCircuitsDir = file("${project.rootDir}/../../gnark-circuits")
+
+  def sourceDir = pkgCircuitsDir.exists() ? pkgCircuitsDir : repoCircuitsDir
+
+  from sourceDir
   into file("${projectDir}/src/main/assets/gnark-circuits")
   include "pk.*", "r1cs.*"
+
   doFirst {
-    println "Copying gnark-circuits from ${project.rootDir}/../gnark-circuits to ${projectDir}/src/main/assets/gnark-circuits"
-    println "Source exists: ${file("${project.rootDir}/../gnark-circuits").exists()}"
-    println "Source files: ${file("${project.rootDir}/../gnark-circuits").listFiles()?.collect { it.name }}"
+    println "[zkp2p-sdk] Copying gnark-circuits from ${sourceDir} -> ${projectDir}/src/main/assets/gnark-circuits"
+    println "[zkp2p-sdk] Source exists: ${sourceDir.exists()}"
+    if (!sourceDir.exists()) {
+      println "[zkp2p-sdk] WARNING: gnark-circuits source directory not found."
+      println "[zkp2p-sdk] If using this SDK from npm, ensure node_modules contains '@zkp2p/zkp2p-react-native-sdk/gnark-circuits'."
+      println "[zkp2p-sdk] Alternatively, copy the circuits into your app assets (see example/android/app/build.gradle)."
+    }
   }
   doLast {
-    println "Copied files:"
-    fileTree("${projectDir}/src/main/assets/gnark-circuits").each { file ->
-      println "  - ${file.name}"
+    println "[zkp2p-sdk] Copied circuit files:"
+    fileTree("${projectDir}/src/main/assets/gnark-circuits").matching { include "pk.*", "r1cs.*" }.files.each { f ->
+      println "  - ${f.name}"
     }
   }
 }
