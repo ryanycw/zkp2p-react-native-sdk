@@ -89,6 +89,7 @@ interface Zkp2pProviderProps {
   walletClient?: WalletClient;
   apiKey?: string;
   chainId?: number;
+  environment?: 'production' | 'staging';
   baseApiUrl?: string;
   logLevel?: 'error' | 'info' | 'debug';
 }
@@ -182,6 +183,7 @@ const Zkp2pProvider = ({
   walletClient,
   apiKey,
   chainId = 8453,
+  environment = 'production',
   baseApiUrl = 'https://api.zkp2p.xyz/v1',
   logLevel,
 }: Zkp2pProviderProps) => {
@@ -202,13 +204,22 @@ const Zkp2pProvider = ({
       walletClient,
       apiKey,
       chainId,
+      environment,
       witnessUrl,
     };
     if (baseApiUrl) {
       clientOptions.baseApiUrl = baseApiUrl;
     }
     return new Zkp2pClient(clientOptions);
-  }, [walletClient, apiKey, chainId, witnessUrl, baseApiUrl, prover]);
+  }, [
+    walletClient,
+    apiKey,
+    chainId,
+    environment,
+    witnessUrl,
+    baseApiUrl,
+    prover,
+  ]);
 
   // ==========================================================================
   // REFS

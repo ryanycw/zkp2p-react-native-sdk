@@ -93,7 +93,8 @@ function PaymentFlow() {
 |------|------|---------|-------------|
 | `walletClient` | `WalletClient` | Optional | Viem wallet client for blockchain interactions (required for full mode) |
 | `apiKey` | `string` | Optional | Your ZKP2P API key (required for full mode) |
-| `chainId` | `number` | `8453` | Blockchain chain ID (8453 for Base, 534352 for Scroll, 31337 for Hardhat) |
+| `chainId` | `number` | `8453` | Blockchain chain ID (8453 for Base, 31337 for Hardhat) |
+| `environment` | `'production' \| 'staging'` | `'production'` | Environment (production or staging) |
 | `prover` | `'reclaim_snarkjs' \| 'reclaim_gnark'` | `'reclaim_gnark'` | Proof generation method |
 | `witnessUrl` | `string` | `'https://witness-proxy.zkp2p.xyz'` | Witness server URL |
 | `baseApiUrl` | `string` | `'https://api.zkp2p.xyz/v1'` | ZKP2P API base URL |

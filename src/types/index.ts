@@ -51,6 +51,7 @@ export interface Zkp2pClientOptions {
   walletClient: WalletClient;
   apiKey: string;
   chainId: number;
+  environment?: 'production' | 'staging';
   baseApiUrl?: string;
   witnessUrl?: string;
   rpcUrl?: string;

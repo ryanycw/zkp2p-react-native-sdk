@@ -7,7 +7,6 @@ import type {
   Currency,
 } from '../types';
 import { apiPostDepositDetails } from '../adapters/api';
-import { DEPLOYED_ADDRESSES } from '../utils/constants';
 import { ethers } from 'ethers';
 import { mapConversionRatesToOnchain } from '../utils/currency';
 import { ValidationError, ZKP2PError, ContractError } from '../errors';
@@ -20,7 +19,10 @@ export async function createDeposit(
   chainId: number,
   params: CreateDepositParams,
   apiKey: string,
-  baseApiUrl: string
+  baseApiUrl: string,
+  gatingServiceAddress: string,
+  zkp2pWitnessSignerAddress: string,
+  processorAddresses: { [key: string]: string }
 ): Promise<{ depositDetails: PostDepositDetailsRequest[]; hash: Hash }> {
   try {
     // Check allowance first
@@ -78,19 +80,13 @@ export async function createDeposit(
     );
 
     const verifierAddresses = params.processorNames.map((processorName) => {
-      if (
-        !DEPLOYED_ADDRESSES?.[chainId]?.[
-          processorName as keyof (typeof DEPLOYED_ADDRESSES)[number]
-        ]
-      ) {
+      if (!processorAddresses[processorName]) {
         throw new ValidationError(
           `Processor ${processorName} not supported on chain ${chainId}`,
           'processorName'
         );
       }
-      return DEPLOYED_ADDRESSES?.[chainId]?.[
-        processorName as keyof (typeof DEPLOYED_ADDRESSES)[number]
-      ];
+      return processorAddresses[processorName] as `0x${string}`;
     });
 
     const depositDetails: PostDepositDetailsRequest[] = params.depositData.map(
@@ -109,15 +105,14 @@ export async function createDeposit(
     // Extra verification data is the zkp2p witness signer address
     const witnessData = ethers.utils.defaultAbiCoder.encode(
       ['address[]'],
-      [[DEPLOYED_ADDRESSES?.[chainId]?.zkp2pWitnessSigner]]
+      [[zkp2pWitnessSignerAddress]]
     );
 
     const verifierData: DepositVerifierData[] = hashedOnchainIds.map(
       (hashedOnchainId) => {
         return {
           payeeDetails: hashedOnchainId as string,
-          intentGatingService: DEPLOYED_ADDRESSES?.[chainId]
-            ?.gatingService as `0x${string}`,
+          intentGatingService: gatingServiceAddress as `0x${string}`,
           data: witnessData as `0x${string}`,
         };
       }

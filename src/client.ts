@@ -1,10 +1,11 @@
 import type { Address, Hash, PublicClient, WalletClient, Chain } from 'viem';
 import { createPublicClient, http } from 'viem';
-import { base, baseSepolia, hardhat, scroll } from 'viem/chains';
+import { base, baseSepolia, hardhat } from 'viem/chains';
 import {
   DEPLOYED_ADDRESSES,
   DEFAULT_BASE_API_URL,
   DEFAULT_WITNESS_URL,
+  type ContractSet,
 } from './utils/constants';
 import { ValidationError } from './errors';
 import type {
@@ -57,6 +58,7 @@ export class Zkp2pClient {
   readonly walletClient: WalletClient;
   readonly apiKey: string;
   readonly chainId: number;
+  readonly environment: 'production' | 'staging';
   readonly baseApiUrl: string;
   readonly witnessUrl: string;
   readonly addresses: {
@@ -82,17 +84,18 @@ export class Zkp2pClient {
     this.walletClient = opts.walletClient;
     this.apiKey = opts.apiKey;
     this.chainId = opts.chainId;
+    this.environment = opts.environment || 'production';
     this.baseApiUrl = opts.baseApiUrl || DEFAULT_BASE_API_URL;
     this.witnessUrl = opts.witnessUrl || DEFAULT_WITNESS_URL;
 
-    const contractAddresses = DEPLOYED_ADDRESSES[this.chainId];
-    if (!contractAddresses) {
+    // Get the appropriate contract addresses based on chainId and environment
+    const addressConfig = DEPLOYED_ADDRESSES[this.chainId];
+    if (!addressConfig) {
       const supportedChainIds = Object.keys(DEPLOYED_ADDRESSES);
       const supportedChainNames: Record<number, string> = {
         8453: 'Base',
         84532: 'Base Sepolia',
         31337: 'Hardhat',
-        534351: 'Scroll',
       };
       const supportedList = supportedChainIds
         .map((id) => `${id} (${supportedChainNames[Number(id)] || 'Unknown'})`)
@@ -102,6 +105,21 @@ export class Zkp2pClient {
         `Unsupported chain ID: ${opts.chainId}. Supported chains are: ${supportedList}`,
         'chainId'
       );
+    }
+
+    // Check if the chain has environment-specific addresses (like Base mainnet)
+    let contractAddresses: ContractSet;
+    if ('production' in addressConfig && 'staging' in addressConfig) {
+      const envAddresses = addressConfig[this.environment];
+      if (!envAddresses) {
+        throw new ValidationError(
+          `Environment '${this.environment}' not supported for chain ID ${this.chainId}`,
+          'environment'
+        );
+      }
+      contractAddresses = envAddresses;
+    } else {
+      contractAddresses = addressConfig as ContractSet;
     }
 
     this.addresses = {
@@ -121,7 +139,6 @@ export class Zkp2pClient {
     const supportedChains: Record<number, Chain> = {
       [base.id]: base,
       [hardhat.id]: hardhat,
-      [scroll.id]: scroll,
       [baseSepolia.id]: baseSepolia,
     };
 
@@ -184,7 +201,10 @@ export class Zkp2pClient {
       this.chainId,
       params,
       this.apiKey,
-      this.baseApiUrl
+      this.baseApiUrl,
+      this.addresses.gatingService,
+      this.addresses.zkp2pWitnessSigner,
+      this.addresses
     );
   }
 

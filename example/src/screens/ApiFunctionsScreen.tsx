@@ -8,7 +8,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { useZkp2p, DEPLOYED_ADDRESSES, currencyInfo } from '../../../src/';
+import { useZkp2p, currencyInfo } from '../../../src/';
 import type { Hash } from 'viem';
 import {
   type WithdrawDepositParams,
@@ -216,7 +216,7 @@ export function ApiFunctionsScreen({
     setDepositHash(null);
     try {
       const result = await zkp2pClient.createDeposit({
-        token: DEPLOYED_ADDRESSES[zkp2pClient.chainId]?.usdc as `0x${string}`,
+        token: zkp2pClient.addresses.usdc,
         amount: BigInt(1000000),
         intentAmountRange: {
           min: BigInt(100000),
