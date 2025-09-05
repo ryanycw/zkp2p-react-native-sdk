@@ -1,17 +1,25 @@
 import { Platform } from 'react-native';
 import type { Address } from 'viem';
 
-export type ContractSet = {
+// Enabled payment platforms (verifiers) for enrichment and platform-aware logic
+export const ENABLED_PLATFORMS = [
+  'venmo',
+  'revolut',
+  'cashapp',
+  'wise',
+  'mercadopago',
+  'zelle',
+  'paypal',
+  'monzo',
+] as const;
+
+export type EnabledPlatform = (typeof ENABLED_PLATFORMS)[number];
+
+type PlatformAddresses = { [P in EnabledPlatform]: Address };
+
+export type ContractSet = PlatformAddresses & {
   usdc: Address;
   escrow: Address;
-  venmo: Address;
-  revolut: Address;
-  cashapp: Address;
-  wise: Address;
-  mercadopago: Address;
-  zelle: Address;
-  paypal: Address;
-  monzo: Address;
   gatingService: Address;
   zkp2pWitnessSigner: Address;
 };
@@ -107,6 +115,26 @@ export const DEPLOYED_ADDRESSES: Contracts = {
     zkp2pWitnessSigner: '0x0636c417755E3ae25C6c166D181c0607F4C572A3',
   },
 };
+
+export function getPlatformAddressMap(
+  addresses: ContractSet
+): Record<EnabledPlatform, Address> {
+  const entries = ENABLED_PLATFORMS.map((p) => [p, addresses[p]] as const);
+  return Object.fromEntries(entries) as Record<EnabledPlatform, Address>;
+}
+
+export function platformFromVerifierAddress(
+  addresses: ContractSet,
+  verifierAddress: string
+): EnabledPlatform | null {
+  if (!verifierAddress) return null;
+  const target = verifierAddress.toLowerCase();
+  for (const p of ENABLED_PLATFORMS) {
+    const addr = addresses[p]?.toLowerCase?.();
+    if (addr && addr === target) return p;
+  }
+  return null;
+}
 
 export const chainIds: { [network: string]: string } = {
   hardhat: '31337',

@@ -1,4 +1,4 @@
-import type { Hash, PublicClient, WalletClient } from 'viem';
+import type { Address, Hash, PublicClient, WalletClient } from 'viem';
 import { ESCROW_ABI, ERC20_ABI } from '../utils/contracts';
 import type {
   CreateDepositParams,
@@ -6,6 +6,8 @@ import type {
   DepositVerifierData,
   Currency,
 } from '../types';
+import type { EnabledPlatform } from '../utils/constants';
+import { ENABLED_PLATFORMS } from '../utils/constants';
 import { apiPostDepositDetails } from '../adapters/api';
 import { ethers } from 'ethers';
 import { mapConversionRatesToOnchain } from '../utils/currency';
@@ -22,8 +24,10 @@ export async function createDeposit(
   baseApiUrl: string,
   gatingServiceAddress: string,
   zkp2pWitnessSignerAddress: string,
-  processorAddresses: { [key: string]: string }
+  processorAddresses: Record<EnabledPlatform, Address>
 ): Promise<{ depositDetails: PostDepositDetailsRequest[]; hash: Hash }> {
+  const isEnabledPlatform = (p: string): p is EnabledPlatform =>
+    (ENABLED_PLATFORMS as readonly string[]).includes(p);
   try {
     // Check allowance first
     if (!walletClient.account) {
@@ -80,7 +84,10 @@ export async function createDeposit(
     );
 
     const verifierAddresses = params.processorNames.map((processorName) => {
-      if (!processorAddresses[processorName]) {
+      if (
+        !isEnabledPlatform(processorName) ||
+        !processorAddresses[processorName]
+      ) {
         throw new ValidationError(
           `Processor ${processorName} not supported on chain ${chainId}`,
           'processorName'

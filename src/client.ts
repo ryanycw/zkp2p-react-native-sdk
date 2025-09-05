@@ -6,6 +6,7 @@ import {
   DEFAULT_BASE_API_URL,
   DEFAULT_WITNESS_URL,
   type ContractSet,
+  getPlatformAddressMap,
 } from './utils/constants';
 import { ValidationError } from './errors';
 import type {
@@ -50,6 +51,8 @@ import { releaseFundsToPayer } from './actions/releaseFundsToPayer';
 import {
   parseEscrowDepositView,
   parseEscrowIntentView,
+  enrichVerifiers,
+  enrichIntentFromVerifiers,
 } from './utils/escrowViewParsers';
 import { ESCROW_ABI } from './utils/contracts';
 import { logger } from './utils/logger';
@@ -61,20 +64,7 @@ export class Zkp2pClient {
   readonly environment: 'production' | 'staging';
   readonly baseApiUrl: string;
   readonly witnessUrl: string;
-  readonly addresses: {
-    escrow: Address;
-    usdc: Address;
-    venmo: Address;
-    revolut: Address;
-    cashapp: Address;
-    wise: Address;
-    mercadopago: Address;
-    zelle: Address;
-    paypal: Address;
-    monzo: Address;
-    gatingService: Address;
-    zkp2pWitnessSigner: Address;
-  };
+  readonly addresses: ContractSet;
   readonly publicClient: PublicClient;
 
   /**
@@ -208,7 +198,7 @@ export class Zkp2pClient {
       this.baseApiUrl,
       this.addresses.gatingService,
       this.addresses.zkp2pWitnessSigner,
-      this.addresses
+      getPlatformAddressMap(this.addresses)
     );
   }
 
@@ -361,7 +351,28 @@ export class Zkp2pClient {
       if (!rawDepositViews) {
         return [];
       }
-      return rawDepositViews.map(parseEscrowDepositView);
+      const parsedViews = rawDepositViews.map(parseEscrowDepositView);
+
+      // Enrich verifiers (always sets paymentMethod; attaches paymentData when apiKey is present)
+      try {
+        await Promise.all(
+          parsedViews.map((view) =>
+            enrichVerifiers(
+              view.verifiers,
+              this.addresses,
+              this.apiKey,
+              this.baseApiUrl
+            )
+          )
+        );
+      } catch (e) {
+        logger.warn(
+          '[zkp2p] Error enriching account deposits with payee data:',
+          e
+        );
+      }
+
+      return parsedViews;
     } catch (error) {
       logger.error('[zkp2p] Error fetching account deposits:', error);
       throw error;
@@ -392,7 +403,25 @@ export class Zkp2pClient {
       ) {
         return null;
       }
-      return parseEscrowIntentView(rawIntentViews);
+      const parsed = parseEscrowIntentView(rawIntentViews);
+
+      // Enrich verifiers for the intent view and propagate to top-level intent
+      try {
+        await enrichVerifiers(
+          parsed.deposit.verifiers,
+          this.addresses,
+          this.apiKey,
+          this.baseApiUrl
+        );
+        enrichIntentFromVerifiers(parsed, this.addresses);
+      } catch (e) {
+        logger.warn(
+          '[zkp2p] Error enriching account intent with payee data:',
+          e
+        );
+      }
+
+      return parsed;
     } catch (error) {
       logger.error('[zkp2p] Error fetching account intent:', error);
       throw error;

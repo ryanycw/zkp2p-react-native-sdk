@@ -589,4 +589,5 @@ export type {
   EscrowRange,
   EscrowDepositView,
   EscrowIntentView,
+  EscrowVerifierDataView,
 } from './escrowViews';

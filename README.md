@@ -463,6 +463,53 @@ zkp2pClient.getUsdcAddress()              // Get USDC contract address
 zkp2pClient.getDeployedAddresses()        // Get all contract addresses
 ```
 
+## On-chain Views Enrichment
+
+- When calling `getAccountDeposits(address)` and `getAccountIntent(address)`, the SDK parses on-chain views and optionally enriches them with off-chain data when an `apiKey` is set.
+- Enrichment adds two fields:
+  - `paymentMethod`: platform key derived from the verifier address (e.g., `venmo`, `cashapp`, `revolut`, `wise`). Always set when the verifier is a supported platform.
+  - `paymentData`: opaque key-value details fetched from the API, available only when an `apiKey` is provided.
+
+Where the data appears
+- Per-verifier: `EscrowDepositView.verifiers[i].verificationData.paymentMethod` and `...verificationData.paymentData`.
+- Top-level intent: `EscrowIntent.paymentMethod` and `EscrowIntent.paymentData` (copied from the verifier matching `paymentVerifier`).
+
+Example
+```ts
+const intentView = await zkp2pClient.getAccountIntent('0xYourAddress');
+if (intentView) {
+  // Top-level enrichment
+  console.log(intentView.intent.paymentMethod); // e.g. 'venmo'
+  console.log(intentView.intent.paymentData);   // e.g. { username: 'alice', contact: '...' }
+
+  // Per-verifier enrichment
+  for (const v of intentView.deposit.verifiers) {
+    console.log(v.verificationData.paymentMethod);
+    console.log(v.verificationData.paymentData);
+  }
+}
+
+const deposits = await zkp2pClient.getAccountDeposits('0xYourAddress');
+for (const d of deposits) {
+  for (const v of d.verifiers) {
+    console.log(v.verificationData.paymentMethod);
+    console.log(v.verificationData.paymentData);
+  }
+}
+```
+
+Notes
+- Enrichment is best-effort; failures are logged and do not throw.
+- `paymentData` requires a valid `apiKey`. `paymentMethod` does not.
+
+## Platform Configuration
+
+- Supported payment platforms are defined once in `ENABLED_PLATFORMS` (src/utils/constants.ts).
+- Contract addresses use a typed `ContractSet` that maps those platforms to verifier addresses, keeping config and types in sync.
+- Helpers:
+  - `platformFromVerifierAddress(addresses, verifierAddress)` resolves the platform key from a verifier contract address.
+  - `getPlatformAddressMap(addresses)` returns `{ [platform]: address }` restricted to enabled platforms.
+
 ## Type Definitions
 
 ### Core Types

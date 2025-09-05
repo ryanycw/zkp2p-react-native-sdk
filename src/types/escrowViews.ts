@@ -55,6 +55,12 @@ export interface EscrowIntent {
   paymentVerifier: string;
   fiatCurrency: string;
   conversionRate: BigNumber;
+  // Optional enriched data resolved via API for the selected verifier
+  paymentData?: {
+    [key: string]: string;
+  };
+  // Optional enriched platform key (e.g., 'wise', 'revolut')
+  paymentMethod?: string;
 }
 
 /*
@@ -73,12 +79,22 @@ export interface EscrowCurrency {
     address intentGatingService;
     string payeeDetails;
     bytes data;
+    paymentData: {
+      [key: string]: string;
+    };
+    paymentMethod?: string;
   }
 */
 export interface EscrowDepositVerifierData {
   intentGatingService: string;
   payeeDetails: string;
   data: string;
+  // Optional enrichment from API when available
+  paymentData?: {
+    [key: string]: string;
+  };
+  // Optional enriched platform key (e.g., 'wise', 'revolut')
+  paymentMethod?: string;
 }
 
 /*
