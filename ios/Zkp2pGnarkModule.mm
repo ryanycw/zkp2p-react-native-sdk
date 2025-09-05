@@ -64,69 +64,70 @@ RCT_EXPORT_MODULE(Zkp2pGnarkModule)
             AlgorithmConfig config = ALGORITHM_CONFIGS[i];
             self.algorithmIdMap[config.name] = @(config.id);
         }
-        
-        [self initializeAllAlgorithms];
     }
     return self;
 }
 
-- (void)initializeAllAlgorithms
+// Lazy initialize a single algorithm on-demand
+- (BOOL)initializeAlgorithmIfNeeded:(NSString *)algorithmName
 {
-    
-    NSBundle *mainBundle = [NSBundle mainBundle];
-    
-    for (NSUInteger i = 0; i < ALGORITHM_COUNT; i++) {
-        AlgorithmConfig config = ALGORITHM_CONFIGS[i];
-        
-        // Look for circuit files in main bundle (copied from gnark-circuits/)
-        NSString *pkFilename = [NSString stringWithFormat:@"pk.%@", config.fileExt];
-        NSString *r1csFilename = [NSString stringWithFormat:@"r1cs.%@", config.fileExt];
-        
-        // The files are now in the root of the bundle, not in a subdirectory
-        NSString *pkPath = [mainBundle pathForResource:pkFilename ofType:nil];
-        NSString *r1csPath = [mainBundle pathForResource:r1csFilename ofType:nil];
-        
-        if (!pkPath || !r1csPath) {
-            NSLog(@"[Zkp2pGnarkModule] ERROR: Circuit files not found for %@", config.name);
-            NSLog(@"  Looking for: %@ and %@", pkFilename, r1csFilename);
-            continue;
-        }
-        
-        
-        NSError *error;
-        NSData *pkData = [NSData dataWithContentsOfFile:pkPath options:0 error:&error];
-        if (error) {
-            NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to load %@: %@", pkFilename, error);
-            continue;
-        }
-        
-        NSData *r1csData = [NSData dataWithContentsOfFile:r1csPath options:0 error:&error];
-        if (error) {
-            NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to load %@: %@", r1csFilename, error);
-            continue;
-        }
-        
-        // Create GoSlices
-        GoSlice pkSlice;
-        pkSlice.data = (void *)[pkData bytes];
-        pkSlice.len = [pkData length];
-        pkSlice.cap = [pkData length];
-        
-        GoSlice r1csSlice;
-        r1csSlice.data = (void *)[r1csData bytes];
-        r1csSlice.len = [r1csData length];
-        r1csSlice.cap = [r1csData length];
-        
-        // Initialize algorithm
-        GoUint8 result = InitAlgorithm(config.id, pkSlice, r1csSlice);
-        
-        if (result == 1) {
-            [self.initializedAlgorithms addObject:config.name];
-        } else {
-            NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to initialize %@ (id: %lu)", config.name, (unsigned long)config.id);
-        }
+    if (!algorithmName) { return NO; }
+    if ([self.initializedAlgorithms containsObject:algorithmName]) {
+        return YES;
     }
-    
+
+    NSNumber *algIdNum = self.algorithmIdMap[algorithmName];
+    if (!algIdNum) {
+        NSLog(@"[Zkp2pGnarkModule] Unknown algorithm: %@", algorithmName);
+        return NO;
+    }
+
+    NSUInteger algId = [algIdNum unsignedIntegerValue];
+    AlgorithmConfig config = ALGORITHM_CONFIGS[algId];
+
+    NSBundle *mainBundle = [NSBundle mainBundle];
+    NSString *pkFilename = [NSString stringWithFormat:@"pk.%@", config.fileExt];
+    NSString *r1csFilename = [NSString stringWithFormat:@"r1cs.%@", config.fileExt];
+
+    NSString *pkPath = [mainBundle pathForResource:pkFilename ofType:nil];
+    NSString *r1csPath = [mainBundle pathForResource:r1csFilename ofType:nil];
+
+    if (!pkPath || !r1csPath) {
+        NSLog(@"[Zkp2pGnarkModule] ERROR: Circuit files not found for %@", algorithmName);
+        return NO;
+    }
+
+    NSError *error = nil;
+    NSData *pkData = [NSData dataWithContentsOfFile:pkPath options:0 error:&error];
+    if (error || !pkData) {
+        NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to load %@: %@", pkFilename, error);
+        return NO;
+    }
+    NSData *r1csData = [NSData dataWithContentsOfFile:r1csPath options:0 error:&error];
+    if (error || !r1csData) {
+        NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to load %@: %@", r1csFilename, error);
+        return NO;
+    }
+
+    GoSlice pkSlice;
+    pkSlice.data = (void *)[pkData bytes];
+    pkSlice.len = [pkData length];
+    pkSlice.cap = [pkData length];
+
+    GoSlice r1csSlice;
+    r1csSlice.data = (void *)[r1csData bytes];
+    r1csSlice.len = [r1csData length];
+    r1csSlice.cap = [r1csData length];
+
+    GoUint8 result = InitAlgorithm((GoUint8)algId, pkSlice, r1csSlice);
+    if (result == 1) {
+        [self.initializedAlgorithms addObject:algorithmName];
+        NSLog(@"[Zkp2pGnarkModule] Initialized algorithm: %@", algorithmName);
+        return YES;
+    } else {
+        NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to initialize %@ (id: %lu)", algorithmName, (unsigned long)algId);
+        return NO;
+    }
 }
 
 - (void)startObserving
@@ -212,13 +213,20 @@ RCT_EXPORT_METHOD(executeZkFunction:(NSString *)requestId
                     return;
                 }
                 
-                if (self.initializedAlgorithms.count == 0) {
-                    NSString *errorMsg = @"No algorithms have been initialized. Circuit files may be missing.";
-                    [self sendResponse:requestId response:nil error:@{@"message": errorMsg}];
-                    reject(@"NO_ALGORITHMS", errorMsg, nil);
-                    return;
+                // Ensure the requested algorithm is initialized lazily
+                if (algorithm && algorithm.length > 0) {
+                    [self initializeAlgorithmIfNeeded:algorithm];
+                } else {
+                    // Try to infer from witness JSON
+                    @try {
+                        NSDictionary *witnessDict = [NSJSONSerialization JSONObjectWithData:witnessData options:0 error:nil];
+                        NSString *cipher = witnessDict[@"cipher"];
+                        if (cipher) {
+                            [self initializeAlgorithmIfNeeded:cipher];
+                        }
+                    } @catch(...) {}
                 }
-                
+
                 NSString *witnessString = [[NSString alloc] initWithData:witnessData encoding:NSUTF8StringEncoding];
                 if (!witnessString) {
                     NSString *errorMsg = @"Failed to convert witness data to string";
@@ -327,6 +335,22 @@ RCT_EXPORT_METHOD(executeZkFunction:(NSString *)requestId
             NSLog(@"[Zkp2pGnarkModule] EXCEPTION: %@", errorMsg);
             [self sendResponse:requestId response:nil error:@{@"message": errorMsg}];
             reject(@"EXCEPTION", errorMsg, nil);
+        }
+    });
+}
+
+// Optional preload API to warm up a specific algorithm
+RCT_EXPORT_METHOD(preloadAlgorithm:(NSString *)algorithm
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        BOOL ok = [self initializeAlgorithmIfNeeded:algorithm];
+        if (ok) {
+            resolve(@{ @"success": @YES });
+        } else {
+            NSString *msg = [NSString stringWithFormat:@"Failed to initialize algorithm: %@", algorithm ?: @"(nil)"];
+            reject(@"PRELOAD_FAILED", msg, nil);
         }
     });
 }

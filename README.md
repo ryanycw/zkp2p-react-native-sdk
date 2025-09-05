@@ -218,6 +218,12 @@ const {
 } = useZkp2p();
 ```
 
+## Performance: Lazy Circuit Loading
+
+- Circuits are now loaded lazily per algorithm (e.g., `aes-256-ctr`, `aes-128-ctr`, `chacha20`) instead of at SDK mount. This significantly reduces app startup time.
+- The SDK extracts the cipher from the witness and begins preloading that specific circuit just before proof generation. Only one circuit is initialized at a time, on demand.
+- If you want to explicitly warm up a circuit even earlier, you may call the native preload via `GnarkBridge.preloadAlgorithm(algorithm)` when you have enough context, though this is optional — the bridge also ensures lazy initialization on first use.
+
 ### Complete Flow Example
 
 ```typescript

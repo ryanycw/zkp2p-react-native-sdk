@@ -97,6 +97,11 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
                     cipherParsed
                   );
 
+                  // Start lazy loading the circuit/algorithm as soon as we know it
+                  try {
+                    await gnarkBridge.preloadAlgorithm(cipherParsed);
+                  } catch {}
+
                   const proofResult = await gnarkBridge.prove(
                     witnessForGnark,
                     cipherParsed

@@ -55,7 +55,6 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
         for (config in ALGORITHM_CONFIGS) {
             algorithmIdMap[config.name] = config.id
         }
-        initializeAllAlgorithms()
     }
 
     override fun getName(): String = NAME
@@ -65,42 +64,47 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
         coroutineScope.cancel()
     }
     
-    private fun initializeAllAlgorithms() {
-        
-        for (config in ALGORITHM_CONFIGS) {
-            try {
-                val pkFilename = "pk.${config.fileExt}"
-                val r1csFilename = "r1cs.${config.fileExt}"
-                
-                val pkData = readAssetFile(pkFilename)
-                val r1csData = readAssetFile(r1csFilename)
-                
-                if (pkData == null || r1csData == null) {
-                    Log.e(NAME, "[Zkp2pGnarkModule] ERROR: Circuit files not found for ${config.name}")
-                    continue
-                }
-                
-                try {
-                    val result = nativeInitAlgorithm(config.id, pkData, r1csData)
-                    
-                    if (result == 1) {
-                        initializedAlgorithms.add(config.name)
-                    } else {
-                        Log.e(NAME, "[Zkp2pGnarkModule] ERROR: Failed to initialize ${config.name} (id: ${config.id})")
-                    }
-                } catch (e: Exception) {
-                    Log.e(NAME, "[Zkp2pGnarkModule] Exception calling nativeInitAlgorithm for ${config.name}", e)
-                } catch (e: UnsatisfiedLinkError) {
-                    Log.e(NAME, "[Zkp2pGnarkModule] Native method not found for ${config.name}", e)
-                } catch (e: Error) {
-                    Log.e(NAME, "[Zkp2pGnarkModule] Error calling nativeInitAlgorithm for ${config.name}", e)
-                }
-                
-            } catch (e: Exception) {
-                Log.e(NAME, "[Zkp2pGnarkModule] Error initializing ${config.name}", e)
-            }
+    private fun getConfigByName(name: String): AlgorithmConfig? {
+        return ALGORITHM_CONFIGS.firstOrNull { it.name == name }
+    }
+
+    private fun ensureAlgorithmInitialized(name: String): Boolean {
+        if (initializedAlgorithms.contains(name)) return true
+        val cfg = getConfigByName(name) ?: run {
+            Log.e(NAME, "[Zkp2pGnarkModule] Unknown algorithm: $name")
+            return false
         }
-        
+        return try {
+            val pkFilename = "pk.${cfg.fileExt}"
+            val r1csFilename = "r1cs.${cfg.fileExt}"
+
+            val pkData = readAssetFile(pkFilename)
+            val r1csData = readAssetFile(r1csFilename)
+
+            if (pkData == null || r1csData == null) {
+                Log.e(NAME, "[Zkp2pGnarkModule] ERROR: Circuit files not found for ${cfg.name}")
+                false
+            } else {
+                val result = nativeInitAlgorithm(cfg.id, pkData, r1csData)
+                if (result == 1) {
+                    initializedAlgorithms.add(cfg.name)
+                    Log.d(NAME, "[Zkp2pGnarkModule] Initialized algorithm: ${cfg.name}")
+                    true
+                } else {
+                    Log.e(NAME, "[Zkp2pGnarkModule] ERROR: Failed to initialize ${cfg.name} (id: ${cfg.id})")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(NAME, "[Zkp2pGnarkModule] Exception initializing ${cfg?.name ?: name}", e)
+            false
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(NAME, "[Zkp2pGnarkModule] Native method not found for ${cfg?.name ?: name}", e)
+            false
+        } catch (e: Error) {
+            Log.e(NAME, "[Zkp2pGnarkModule] Error initializing ${cfg?.name ?: name}", e)
+            false
+        }
     }
     
     private fun readAssetFile(filename: String): ByteArray? {
@@ -138,9 +142,9 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
                 when (functionName) {
                     "groth16Prove" -> {
                         Log.d(NAME, "[Zkp2pGnarkModule] groth16Prove called with algorithm: $algorithm")
-                        
-                        if (initializedAlgorithms.isEmpty()) {
-                            throw Exception("No algorithms have been initialized. Circuit files may be missing.")
+                        // Lazy initialize requested algorithm if provided
+                        if (algorithm.isNotBlank()) {
+                            ensureAlgorithmInitialized(algorithm)
                         }
                         
                         // Check cancellation before starting
@@ -201,8 +205,22 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
         
         val witnessJson = String(witnessBytes, Charsets.UTF_8)
         
+        // If nothing initialized yet, try to infer and initialize from witness
         if (initializedAlgorithms.isEmpty()) {
-            throw Exception("No algorithms have been initialized. Circuit files may be missing.")
+            try {
+                val argString = args.getString(0)
+                val base64Value = try {
+                    val argObject = JSONObject(argString)
+                    argObject.optString("value") ?: argString
+                } catch (e: Exception) { argString }
+                val witnessBytes = Base64.decode(base64Value, Base64.DEFAULT)
+                val witnessJson = String(witnessBytes, Charsets.UTF_8)
+                val obj = JSONObject(witnessJson)
+                val cipher = obj.optString("cipher", "")
+                if (cipher.isNotBlank()) {
+                    ensureAlgorithmInitialized(cipher)
+                }
+            } catch (_: Exception) { /* ignore */ }
         }
         
         try {
@@ -291,6 +309,18 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
         return arrayOf("GnarkRPCResponse")
     }
     
+    @ReactMethod
+    fun preloadAlgorithm(algorithm: String, promise: Promise) {
+        coroutineScope.launch {
+            val ok = ensureAlgorithmInitialized(algorithm)
+            if (ok) {
+                promise.resolve(Arguments.createMap().apply { putBoolean("success", true) })
+            } else {
+                promise.reject("PRELOAD_FAILED", "Failed to initialize algorithm: $algorithm")
+            }
+        }
+    }
+
     @ReactMethod
     fun cancelProofGeneration(requestId: String, promise: Promise) {
         Log.d(NAME, "[Zkp2pGnarkModule] Cancelling proof generation for request: $requestId")

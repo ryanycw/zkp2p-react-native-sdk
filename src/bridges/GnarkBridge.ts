@@ -111,6 +111,20 @@ export class GnarkBridge {
   }
 
   /**
+   * Preload a specific algorithm/circuit into native memory (lazy init)
+   */
+  async preloadAlgorithm(algorithm: string): Promise<void> {
+    try {
+      const native: any = this.nativeModule as any;
+      if (typeof native.preloadAlgorithm === 'function') {
+        await native.preloadAlgorithm(algorithm);
+      }
+    } catch (err) {
+      logger.warn('[GnarkBridge] preloadAlgorithm failed (continuing):', err);
+    }
+  }
+
+  /**
    * Cancel an active proof generation
    * @param requestId The request ID of the proof to cancel
    * @returns Promise resolving when cancellation is complete
