@@ -322,8 +322,8 @@ export class Zkp2pClient {
   }
 
   /**
-   * Get order statistics for multiple deposits.
-   * Returns statistics including total, fulfilled, cancelled, released, expired, and created order counts and amounts.
+   * Get intent statistics for multiple deposits.
+   * Returns counts: totalIntents, signaledIntents, fulfilledIntents, prunedIntents.
    */
   async getDepositsOrderStats(
     params: GetDepositsOrderStatsRequest

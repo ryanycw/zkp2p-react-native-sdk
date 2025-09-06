@@ -892,19 +892,11 @@ describe('apiGetDepositsOrderStats', () => {
 
   it('should fetch order statistics for multiple deposits', async () => {
     const mockOrderStats: OrderStats = {
-      depositId: '123',
-      totalOrderCount: 10,
-      totalOrderAmount: '100000',
-      fulfilledOrderCount: 5,
-      fulfilledOrderAmount: '50000',
-      cancelledOrderCount: 2,
-      cancelledOrderAmount: '20000',
-      releasedOrderCount: 1,
-      releasedOrderAmount: '10000',
-      expiredOrderCount: 1,
-      expiredOrderAmount: '10000',
-      createdOrderCount: 1,
-      createdOrderAmount: '10000',
+      id: 123,
+      totalIntents: 10,
+      signaledIntents: 7,
+      fulfilledIntents: 2,
+      prunedIntents: 1,
     };
 
     const mockResponse = {
@@ -936,7 +928,7 @@ describe('apiGetDepositsOrderStats', () => {
         body: JSON.stringify({ depositIds: [123, 456] }),
       })
     );
-    expect(result.responseObject[0]?.totalOrderCount).toBe(10);
+    expect(result.responseObject[0]?.totalIntents).toBe(10);
   });
 
   it('should handle server error during POST request', async () => {

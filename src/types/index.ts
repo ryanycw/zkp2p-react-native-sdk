@@ -408,20 +408,13 @@ export type GetDepositByIdResponse = {
   statusCode: number;
 };
 
+// Intent/order statistics returned by `/deposits/order-stats`
 export type OrderStats = {
-  depositId: string;
-  totalOrderCount: number;
-  totalOrderAmount: string;
-  fulfilledOrderCount: number;
-  fulfilledOrderAmount: string;
-  cancelledOrderCount: number;
-  cancelledOrderAmount: string;
-  releasedOrderCount: number;
-  releasedOrderAmount: string;
-  expiredOrderCount: number;
-  expiredOrderAmount: string;
-  createdOrderCount: number;
-  createdOrderAmount: string;
+  id: number;
+  totalIntents: number;
+  signaledIntents: number;
+  fulfilledIntents: number;
+  prunedIntents: number;
 };
 
 export type GetDepositsOrderStatsRequest = {
@@ -482,7 +475,6 @@ export interface ProviderMetadata {
   shouldReplayRequestInPage?: boolean;
   transactionsExtraction: TransactionsExtraction;
   proofMetadataSelectors: Selector[];
-  // Optional dedicated endpoint to fetch metadata safely (must be same-origin & HTTPS)
   metadataUrl?: string;
   metadataUrlMethod?: 'GET' | 'POST' | 'PUT' | 'PATCH';
   metadataUrlBody?: string;
