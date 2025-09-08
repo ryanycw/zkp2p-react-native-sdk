@@ -287,23 +287,46 @@ export type ValidatePayeeDetailsResponse = {
 
 export type DepositStatus = 'ACTIVE' | 'WITHDRAWN' | 'CLOSED';
 
-export type Deposit = {
-  id: string;
-  owner: string;
-  amount: string;
-  minimumIntent: string;
-  maximumIntent: string;
-  status: DepositStatus;
-  updatedAt: Date;
+export type DepositVerifierCurrency = {
+  id: number;
+  depositVerifierId: number;
+  currencyCode: string; // bytes32 hash as hex string
+  conversionRate: string;
   createdAt: Date;
-  processorPaymentData: Array<{
-    processor: string;
-    paymentDetailsHash: string;
-    isHashed: boolean;
-    paymentDetails: string;
-    updatedAt: Date;
-    createdAt: Date;
-  }>;
+  updatedAt: Date;
+};
+
+export type DepositVerifier = {
+  id: number;
+  depositId: number;
+  verifier: Address;
+  intentGatingService: Address;
+  payeeDetailsHash: string;
+  data: string;
+  createdAt: Date;
+  updatedAt: Date;
+  currencies: DepositVerifierCurrency[];
+};
+
+export type Deposit = {
+  id: number;
+  depositor: Address;
+  token: Address;
+  amount: string;
+  remainingDeposits: string;
+  intentAmountMin: string;
+  intentAmountMax: string;
+  acceptingIntents: boolean;
+  outstandingIntentAmount: string;
+  availableLiquidity: string;
+  status: DepositStatus;
+  totalIntents: number;
+  signaledIntents: number;
+  fulfilledIntents: number;
+  prunedIntents: number;
+  createdAt: Date;
+  updatedAt: Date;
+  verifiers: DepositVerifier[];
 };
 
 export type GetOwnerDepositsRequest = {
@@ -318,35 +341,30 @@ export type GetOwnerDepositsResponse = {
   statusCode: number;
 };
 
-export type IntentStatusType =
-  | 'CREATED'
-  | 'FULFILLED'
-  | 'CANCELLED'
-  | 'RELEASED'
-  | 'EXPIRED';
+export type IntentStatusType = 'SIGNALED' | 'FULFILLED' | 'PRUNED';
 
+// API: /orders/* response type
 export type Intent = {
   id: number;
   intentHash: string;
-  depositId: number;
-  owner: string;
-  toAddress: string;
-  amount: string;
   status: IntentStatusType;
+  depositId: string; // API returns string
+  verifier: Address;
+  owner: Address;
+  toAddress: Address;
+  amount: string;
+  fiatCurrency: string;
+  conversionRate: string;
+  sustainabilityFee: string | null;
+  verifierFee: string | null;
   signalTxHash: string;
   signalTimestamp: Date;
   fulfillTxHash: string | null;
   fulfillTimestamp: Date | null;
   pruneTxHash: string | null;
   prunedTimestamp: Date | null;
-  chainId?: number;
-  fiatCurrency: string;
-  conversionRate: string;
-  verifier: string;
-  sustainabilityFee: string | null;
-  verifierFee: string | null;
-  updatedAt: Date;
   createdAt: Date;
+  updatedAt: Date;
 };
 
 export type GetOwnerIntentsRequest = {

@@ -263,22 +263,44 @@ describe('apiGetOwnerDeposits', () => {
     jest.clearAllMocks();
   });
   const mockDeposit: Deposit = {
-    id: '123',
-    owner: '0xabc123',
+    id: 123,
+    depositor: '0xabc123',
+    token: '0xUSDC',
     amount: '1000000',
-    minimumIntent: '100000',
-    maximumIntent: '500000',
+    remainingDeposits: '900000',
+    intentAmountMin: '100000',
+    intentAmountMax: '500000',
+    acceptingIntents: true,
+    outstandingIntentAmount: '0',
+    availableLiquidity: '0',
     status: 'ACTIVE',
+    totalIntents: 0,
+    signaledIntents: 0,
+    fulfilledIntents: 0,
+    prunedIntents: 0,
     updatedAt: new Date('2024-01-15T10:00:00Z'),
     createdAt: new Date('2024-01-10T10:00:00Z'),
-    processorPaymentData: [
+    verifiers: [
       {
-        processor: 'venmo',
-        paymentDetailsHash: '0xhash123',
-        isHashed: true,
-        paymentDetails: 'user@venmo',
-        updatedAt: new Date('2024-01-10T10:00:00Z'),
+        id: 1,
+        depositId: 123,
+        verifier: '0xVerifier',
+        intentGatingService: '0xGating',
+        payeeDetailsHash: '0xpayeehash',
+        data: '0xdata',
         createdAt: new Date('2024-01-10T10:00:00Z'),
+        updatedAt: new Date('2024-01-10T10:00:00Z'),
+        currencies: [
+          {
+            id: 1,
+            depositVerifierId: 1,
+            currencyCode:
+              '0x5553440000000000000000000000000000000000000000000000000000000000',
+            conversionRate: '1000000',
+            createdAt: new Date('2024-01-10T10:00:00Z'),
+            updatedAt: new Date('2024-01-10T10:00:00Z'),
+          },
+        ],
       },
     ],
   };
@@ -291,11 +313,18 @@ describe('apiGetOwnerDeposits', () => {
         ...mockDeposit,
         updatedAt: '2024-01-15T10:00:00Z',
         createdAt: '2024-01-10T10:00:00Z',
-        processorPaymentData: [
+        verifiers: [
           {
-            ...mockDeposit.processorPaymentData[0],
+            ...mockDeposit.verifiers[0]!,
             updatedAt: '2024-01-10T10:00:00Z',
             createdAt: '2024-01-10T10:00:00Z',
+            currencies: [
+              {
+                ...mockDeposit.verifiers[0]!.currencies[0]!,
+                createdAt: '2024-01-10T10:00:00Z',
+                updatedAt: '2024-01-10T10:00:00Z',
+              },
+            ],
           },
         ],
       },
@@ -330,9 +359,9 @@ describe('apiGetOwnerDeposits', () => {
     expect(result.responseObject).toHaveLength(1);
     expect(result.responseObject[0]!.updatedAt).toBeInstanceOf(Date);
     expect(result.responseObject[0]!.createdAt).toBeInstanceOf(Date);
-    expect(
-      result.responseObject[0]!.processorPaymentData[0]!.updatedAt
-    ).toBeInstanceOf(Date);
+    expect(result.responseObject[0]!.verifiers[0]!.updatedAt).toBeInstanceOf(
+      Date
+    );
   });
 
   it('should fetch owner deposits with status filter', async () => {
@@ -376,23 +405,22 @@ describe('apiGetOwnerIntents', () => {
   const mockIntent: Intent = {
     id: 456,
     intentHash: '0x456abc',
-    depositId: 123,
+    status: 'SIGNALED',
+    depositId: '123',
+    verifier: '0xVerifier',
     owner: '0xabc123',
     toAddress: '0xdef456',
     amount: '100000',
-    status: 'CREATED',
+    fiatCurrency: 'USD',
+    conversionRate: '1.05',
+    sustainabilityFee: null,
+    verifierFee: null,
     signalTxHash: '0xSignalHash',
     signalTimestamp: new Date('2024-01-14T12:00:00Z'),
     fulfillTxHash: null,
     fulfillTimestamp: null,
     pruneTxHash: null,
     prunedTimestamp: null,
-    chainId: 8453,
-    fiatCurrency: 'USD',
-    conversionRate: '1.05',
-    verifier: '0xVerifier',
-    sustainabilityFee: null,
-    verifierFee: null,
     updatedAt: new Date('2024-01-15T12:00:00Z'),
     createdAt: new Date('2024-01-14T12:00:00Z'),
   };
@@ -483,30 +511,55 @@ describe('Date transformation', () => {
       message: 'Success',
       responseObject: [
         {
-          id: '1',
-          owner: '0x123',
+          id: 1,
+          depositor: '0x123',
+          token: '0xUSDC',
           amount: '1000',
-          minimumIntent: '100',
-          maximumIntent: '500',
+          remainingDeposits: '900',
+          intentAmountMin: '100',
+          intentAmountMax: '500',
+          acceptingIntents: true,
+          outstandingIntentAmount: '0',
+          availableLiquidity: '0',
           status: 'ACTIVE' as const,
+          totalIntents: 0,
+          signaledIntents: 0,
+          fulfilledIntents: 0,
+          prunedIntents: 0,
           updatedAt: '2024-01-15T10:00:00Z',
           createdAt: '2024-01-10T10:00:00Z',
-          processorPaymentData: [
+          verifiers: [
             {
-              processor: 'venmo',
-              paymentDetailsHash: '0xhash',
-              isHashed: true,
-              paymentDetails: 'details',
+              id: 1,
+              depositId: 1,
+              verifier: '0xVerifier',
+              intentGatingService: '0xGating',
+              payeeDetailsHash: '0xhash',
+              data: '0xdata',
               updatedAt: '2024-01-12T10:00:00Z',
               createdAt: '2024-01-11T10:00:00Z',
+              currencies: [
+                {
+                  id: 1,
+                  depositVerifierId: 1,
+                  currencyCode:
+                    '0x5553440000000000000000000000000000000000000000000000000000000000',
+                  conversionRate: '1000000',
+                  updatedAt: '2024-01-12T10:00:00Z',
+                  createdAt: '2024-01-11T10:00:00Z',
+                },
+              ],
             },
             {
-              processor: 'cashapp',
-              paymentDetailsHash: '0xhash2',
-              isHashed: false,
-              paymentDetails: 'details2',
+              id: 2,
+              depositId: 1,
+              verifier: '0xVerifier2',
+              intentGatingService: '0xGating2',
+              payeeDetailsHash: '0xhash2',
+              data: '0xdata2',
               updatedAt: '2024-01-13T10:00:00Z',
               createdAt: '2024-01-11T10:00:00Z',
+              currencies: [],
             },
           ],
         },
@@ -530,9 +583,13 @@ describe('Date transformation', () => {
     expect(result.responseObject[0]!.createdAt).toBeInstanceOf(Date);
 
     // Check nested array dates
-    result.responseObject[0]!.processorPaymentData.forEach((data) => {
-      expect(data.updatedAt).toBeInstanceOf(Date);
-      expect(data.createdAt).toBeInstanceOf(Date);
+    result.responseObject[0]!.verifiers.forEach((v) => {
+      expect(v.updatedAt).toBeInstanceOf(Date);
+      expect(v.createdAt).toBeInstanceOf(Date);
+      v.currencies.forEach((c) => {
+        expect(c.updatedAt).toBeInstanceOf(Date);
+        expect(c.createdAt).toBeInstanceOf(Date);
+      });
     });
   });
 });
@@ -547,25 +604,24 @@ describe('apiGetIntentsByDeposit', () => {
   const mockIntent: Intent = {
     id: 123,
     intentHash: '0x123abc',
-    depositId: 456,
+    status: 'SIGNALED',
+    depositId: '456',
+    verifier: '0xVerifier',
     owner: '0xabc123',
     toAddress: '0xdef456',
     amount: '100000',
-    status: 'CREATED',
+    fiatCurrency: 'USD',
+    conversionRate: '1.05',
+    sustainabilityFee: null,
+    verifierFee: null,
     signalTxHash: '0xSignalHash',
     signalTimestamp: new Date('2024-01-14T12:00:00Z'),
     fulfillTxHash: null,
     fulfillTimestamp: null,
     pruneTxHash: null,
     prunedTimestamp: null,
-    chainId: 8453,
-    fiatCurrency: 'USD',
-    conversionRate: '1.05',
-    verifier: '0xVerifier',
-    sustainabilityFee: null,
-    verifierFee: null,
-    updatedAt: new Date('2024-01-15T12:00:00Z'),
     createdAt: new Date('2024-01-14T12:00:00Z'),
+    updatedAt: new Date('2024-01-15T12:00:00Z'),
   };
 
   it('should fetch intents by deposit ID', async () => {
@@ -607,7 +663,7 @@ describe('apiGetIntentsByDeposit', () => {
         },
       })
     );
-    expect(result.responseObject[0]?.status).toBe('CREATED');
+    expect(result.responseObject[0]?.status).toBe('SIGNALED');
   });
 
   it('should handle status filter as array', async () => {
@@ -624,13 +680,13 @@ describe('apiGetIntentsByDeposit', () => {
     });
 
     await apiGetIntentsByDeposit(
-      { depositId: '456', status: ['CREATED', 'FULFILLED'] },
+      { depositId: '456', status: ['SIGNALED', 'FULFILLED'] },
       mockApiKey,
       mockBaseUrl
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `${mockBaseUrl}/orders/deposit/456?status=CREATED,FULFILLED`,
+      `${mockBaseUrl}/orders/deposit/456?status=SIGNALED,FULFILLED`,
       expect.any(Object)
     );
   });
@@ -655,23 +711,22 @@ describe('apiGetIntentsByTaker', () => {
   const mockIntent: Intent = {
     id: 123,
     intentHash: '0x123abc',
-    depositId: 456,
+    status: 'SIGNALED',
+    depositId: '456',
+    verifier: '0xVerifier',
     owner: '0xabc123',
     toAddress: '0xdef456',
     amount: '100000',
-    status: 'CREATED',
+    fiatCurrency: 'USD',
+    conversionRate: '1.05',
+    sustainabilityFee: null,
+    verifierFee: null,
     signalTxHash: '0xSignalHash',
     signalTimestamp: new Date('2024-01-14T12:00:00Z'),
     fulfillTxHash: null,
     fulfillTimestamp: null,
     pruneTxHash: null,
     prunedTimestamp: null,
-    chainId: 8453,
-    fiatCurrency: 'USD',
-    conversionRate: '1.05',
-    verifier: '0xVerifier',
-    sustainabilityFee: null,
-    verifierFee: null,
     updatedAt: new Date('2024-01-15T12:00:00Z'),
     createdAt: new Date('2024-01-14T12:00:00Z'),
   };
@@ -731,23 +786,22 @@ describe('apiGetIntentByHash', () => {
   const mockIntent: Intent = {
     id: 123,
     intentHash: '0x123abc',
-    depositId: 456,
+    status: 'SIGNALED',
+    depositId: '456',
+    verifier: '0xVerifier',
     owner: '0xabc123',
     toAddress: '0xdef456',
     amount: '100000',
-    status: 'CREATED',
+    fiatCurrency: 'USD',
+    conversionRate: '1.05',
+    sustainabilityFee: null,
+    verifierFee: null,
     signalTxHash: '0xSignalHash',
     signalTimestamp: new Date('2024-01-14T12:00:00Z'),
     fulfillTxHash: null,
     fulfillTimestamp: null,
     pruneTxHash: null,
     prunedTimestamp: null,
-    chainId: 8453,
-    fiatCurrency: 'USD',
-    conversionRate: '1.05',
-    verifier: '0xVerifier',
-    sustainabilityFee: null,
-    verifierFee: null,
     updatedAt: new Date('2024-01-15T12:00:00Z'),
     createdAt: new Date('2024-01-14T12:00:00Z'),
   };
@@ -818,15 +872,24 @@ describe('apiGetDepositById', () => {
   });
 
   const mockDeposit: Deposit = {
-    id: '123',
-    owner: '0xabc123',
+    id: 123,
+    depositor: '0xabc123',
+    token: '0xUSDC',
     amount: '1000000',
-    minimumIntent: '100',
-    maximumIntent: '10000',
+    remainingDeposits: '999000',
+    intentAmountMin: '100',
+    intentAmountMax: '10000',
+    acceptingIntents: true,
+    outstandingIntentAmount: '0',
+    availableLiquidity: '0',
     status: 'ACTIVE',
+    totalIntents: 0,
+    signaledIntents: 0,
+    fulfilledIntents: 0,
+    prunedIntents: 0,
     updatedAt: new Date('2024-01-15T12:00:00Z'),
     createdAt: new Date('2024-01-14T12:00:00Z'),
-    processorPaymentData: [],
+    verifiers: [],
   };
 
   it('should fetch a single deposit by ID', async () => {
@@ -866,7 +929,7 @@ describe('apiGetDepositById', () => {
         },
       })
     );
-    expect(result.responseObject.id).toBe('123');
+    expect(result.responseObject.id).toBe(123);
   });
 
   it('should handle invalid deposit ID format', async () => {
