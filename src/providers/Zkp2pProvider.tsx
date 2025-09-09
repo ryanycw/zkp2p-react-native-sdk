@@ -233,8 +233,6 @@ const Zkp2pProvider = ({
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const openAnimation = useRef(new Animated.Value(1)).current;
   const sessionIdRef = useRef(0);
-  // RPC WebView visibility + readiness
-  const [rpcVisible, setRpcVisible] = useState(false);
   const rpcLoadedRef = useRef(false);
   const rpcReadyResolversRef = useRef<Array<() => void>>([]);
   const rpcAutoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -262,9 +260,8 @@ const Zkp2pProvider = ({
   // STATE MANAGEMENT
   // ==========================================================================
 
-  // Provider and flow state
   const [provider, setProvider] = useState<ProviderSettings | null>(null);
-  const [rpcKey, setRpcKey] = useState(0);
+  const [rpcVisible, setRpcVisible] = useState(false);
 
   const [flow, dispatch] = useReducer(flowReducer, initialFlow);
   const flowState: FlowState = flow.phase as FlowState;
@@ -370,22 +367,11 @@ const Zkp2pProvider = ({
     [configBaseUrl]
   );
 
-  const _getOrFetchProviderConfig = useCallback(
-    async (
-      platform: string,
-      actionType: string,
-      currentProviderConfig: ProviderSettings | null
-    ): Promise<ProviderSettings> => {
-      if (
-        currentProviderConfig &&
-        currentProviderConfig.metadata.platform === platform &&
-        currentProviderConfig.actionType === actionType
-      ) {
-        return currentProviderConfig;
-      }
-      const newCfg = await _fetchProviderConfig(platform, actionType);
-      setProvider(newCfg);
-      return newCfg;
+  const _refetchProviderConfig = useCallback(
+    async (platform: string, actionType: string): Promise<ProviderSettings> => {
+      const cfg = await _fetchProviderConfig(platform, actionType);
+      setProvider(cfg);
+      return cfg;
     },
     [_fetchProviderConfig, setProvider]
   );
@@ -1207,15 +1193,7 @@ const Zkp2pProvider = ({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      _rpcRequest,
-      witnessUrl,
-      prover,
-      setProofData,
-      setRpcKey,
-      gnarkBridge,
-      dispatch,
-    ]
+    [_rpcRequest, witnessUrl, prover, setProofData, gnarkBridge, dispatch]
   );
 
   // Internal helper to generate a single proof without modifying state
@@ -1376,18 +1354,23 @@ const Zkp2pProvider = ({
           logger.info('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
         }
       } catch {}
-      const { existingProviderConfig, initialAction, autoGenerateProof } =
-        options;
+      const { initialAction, autoGenerateProof } = options;
 
       // Reset flow data (errors are cleared by transitions ACTION_START/AUTH_OPEN)
       setMetadataList([]);
       setInterceptedPayload(null);
       setProofData([]);
 
-      // Get provider configuration
-      const cfg =
-        existingProviderConfig ??
-        (await _getOrFetchProviderConfig(platform, actionType, provider));
+      const { existingProviderConfig } = options;
+      let cfg: ProviderSettings;
+      if (existingProviderConfig) {
+        cfg = existingProviderConfig;
+        try {
+          setProvider(cfg);
+        } catch {}
+      } else {
+        cfg = await _refetchProviderConfig(platform, actionType);
+      }
 
       // Handle action link if it exists
       const hasAnyActionLink =
@@ -1407,8 +1390,7 @@ const Zkp2pProvider = ({
       return cfg;
     },
     [
-      _getOrFetchProviderConfig,
-      provider,
+      _refetchProviderConfig,
       _handleInitialAction,
       setMetadataList,
       setInterceptedPayload,
@@ -1442,19 +1424,19 @@ const Zkp2pProvider = ({
       setInterceptedPayload(null);
 
       const { existingProviderConfig, autoGenerateProof } = options;
-      const cfg =
-        existingProviderConfig ||
-        (await _getOrFetchProviderConfig(platform, actionType, provider));
+      let cfg: ProviderSettings;
+      if (existingProviderConfig) {
+        cfg = existingProviderConfig;
+        try {
+          setProvider(cfg);
+        } catch {}
+      } else {
+        cfg = await _refetchProviderConfig(platform, actionType);
+      }
 
       await _authenticateInternal(cfg, autoGenerateProof || null);
     },
-    [
-      provider,
-      _getOrFetchProviderConfig,
-      _authenticateInternal,
-      abortAllPending,
-      dispatch,
-    ]
+    [_refetchProviderConfig, _authenticateInternal, abortAllPending, dispatch]
   );
 
   /*
@@ -1509,6 +1491,7 @@ const Zkp2pProvider = ({
 
       // Reset in-memory state
       setMetadataList([]);
+      setProvider(null);
       setInterceptedPayload(null);
       setProofData([]);
       setAutoGenerateOptions(null);
@@ -1517,6 +1500,12 @@ const Zkp2pProvider = ({
         setRpcVisible(false);
         rpcLoadedRef.current = false;
       });
+      // Clear any RPC timers and ready waiters
+      if (rpcAutoHideTimerRef.current) {
+        clearTimeout(rpcAutoHideTimerRef.current);
+        rpcAutoHideTimerRef.current = null;
+      }
+      rpcReadyResolversRef.current = [];
 
       // Reset flow reducer to initial
       dispatch({ type: 'RESET' });
@@ -1686,7 +1675,7 @@ const Zkp2pProvider = ({
           </View>
         </Animated.View>
       )}
-      {rpcVisible && <RPCWebView key={rpcKey} {...rpcWebViewProps} />}
+      {rpcVisible && <RPCWebView {...rpcWebViewProps} />}
 
       {/* Proof Generation Spinner */}
       {(flowState === 'proofGenerating' ||
