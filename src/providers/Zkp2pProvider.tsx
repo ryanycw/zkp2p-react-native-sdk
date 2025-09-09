@@ -227,11 +227,19 @@ const Zkp2pProvider = ({
 
   const rpcWebViewRef = useRef<WebView>(null);
   const authWebViewRef = useRef<WebView>(null);
+  const isClosingRef = useRef(false);
   const pending = useRef<Record<string, PendingEntry>>({});
   const spinAnimation = useRef(new Animated.Value(0)).current;
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const openAnimation = useRef(new Animated.Value(1)).current;
   const sessionIdRef = useRef(0);
+  // RPC WebView visibility + readiness
+  const [rpcVisible, setRpcVisible] = useState(false);
+  const rpcLoadedRef = useRef(false);
+  const rpcReadyResolversRef = useRef<Array<() => void>>([]);
+  const rpcAutoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   // ==========================================================================
   // GNARK BRIDGE SETUP
@@ -280,6 +288,50 @@ const Zkp2pProvider = ({
 
   // WebView state
   const [isWebViewMinimized, setIsWebViewMinimized] = useState(false);
+
+  // Auth webview mount/unmount logs
+  const wasAuthMountedRef = useRef(false);
+  useEffect(() => {
+    if (authWebViewProps && !wasAuthMountedRef.current) {
+      wasAuthMountedRef.current = true;
+      logger.info('[AuthWebView] mounted');
+    } else if (!authWebViewProps && wasAuthMountedRef.current) {
+      wasAuthMountedRef.current = false;
+      logger.info('[AuthWebView] unmounted');
+    }
+  }, [authWebViewProps]);
+
+  /*
+   * Closes the auth webview (idempotent)
+   */
+  const closeAuthWebView = useCallback(
+    (afterClose?: () => void) => {
+      if (isClosingRef.current) {
+        afterClose?.();
+        return;
+      }
+      isClosingRef.current = true;
+      Animated.timing(openAnimation, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: false,
+      }).start(() => {
+        setAuthWebViewProps(null);
+        setIsWebViewMinimized(false);
+        slideAnimation.setValue(0);
+        dispatch({ type: 'AUTH_CLOSE' });
+        isClosingRef.current = false;
+        afterClose?.();
+      });
+    },
+    [
+      openAnimation,
+      setAuthWebViewProps,
+      setIsWebViewMinimized,
+      slideAnimation,
+      dispatch,
+    ]
+  );
 
   useEffect(() => {
     sessionIdRef.current = flow.session;
@@ -386,6 +438,9 @@ const Zkp2pProvider = ({
 
   const _handleAuthIntercept = useCallback(
     async (evt: NetworkEvent, cfg: ProviderSettings) => {
+      if (isClosingRef.current) {
+        return;
+      }
       const sid = sessionIdRef.current;
       const { metadata } = cfg;
       const primaryHit =
@@ -459,12 +514,11 @@ const Zkp2pProvider = ({
           itemExtractionError = new Error('No transactions found');
         }
 
-        // Close webview and update state
-        setAuthWebViewProps(null);
         dispatch({
           type: 'AUTH_SUCCESS_WITH_ERROR',
           error: itemExtractionError ?? null,
         });
+        closeAuthWebView();
       } catch (err) {
         logger.error(
           '[zkp2p] failed to retrieve/process JSON body (via _handleAuthIntercept):',
@@ -474,10 +528,10 @@ const Zkp2pProvider = ({
         setMetadataList([]);
         setInterceptedPayload(null);
         dispatch({ type: 'AUTH_FAILURE', error: err as Error });
-        setAuthWebViewProps(null);
+        closeAuthWebView();
       }
     },
-    [setMetadataList, setInterceptedPayload, setAuthWebViewProps, dispatch]
+    [setMetadataList, setInterceptedPayload, dispatch, closeAuthWebView]
   );
 
   const _processInjectedScript = useCallback(
@@ -526,11 +580,11 @@ const Zkp2pProvider = ({
             type: 'SET_AUTH_ERROR',
             error: new Error(String(e.nativeEvent?.description ?? e.type)),
           });
-          setAuthWebViewProps(null);
+          closeAuthWebView();
         },
       };
     },
-    [_handleAuthIntercept, setAuthWebViewProps, dispatch]
+    [_handleAuthIntercept, dispatch, closeAuthWebView]
   );
 
   const _authenticateInternal = useCallback(
@@ -548,7 +602,7 @@ const Zkp2pProvider = ({
       try {
         const reused = await _restoreSessionWith(cfg);
         if (reused) {
-          setAuthWebViewProps(null);
+          closeAuthWebView();
           return;
         }
       } catch (err) {
@@ -576,6 +630,7 @@ const Zkp2pProvider = ({
       openAnimation,
       dispatch,
       setAutoGenerateOptions,
+      closeAuthWebView,
     ]
   );
 
@@ -644,7 +699,7 @@ const Zkp2pProvider = ({
             type: 'AUTH_FAILURE',
             error: new Error(String(e.nativeEvent?.description ?? e.type)),
           });
-          setAuthWebViewProps(null);
+          closeAuthWebView();
         },
       });
       slideAnimation.setValue(0);
@@ -664,6 +719,7 @@ const Zkp2pProvider = ({
       slideAnimation,
       openAnimation,
       dispatch,
+      closeAuthWebView,
     ]
   );
 
@@ -807,7 +863,13 @@ const Zkp2pProvider = ({
       req: RPCCreateClaimOptions,
       onStep?: (msg: RPCResponse) => void
     ): Promise<RPCResponse> => {
-      if (!rpcWebViewRef.current) throw new Error('RPC not ready');
+      // Ensure RPC WebView is visible and loaded
+      if (!rpcVisible) setRpcVisible(true);
+      if (!rpcLoadedRef.current) {
+        await new Promise<void>((resolve) => {
+          rpcReadyResolversRef.current.push(resolve);
+        });
+      }
 
       const id = Math.random().toString(16).slice(2);
       const msg: WindowRPCIncomingMsg = {
@@ -848,46 +910,49 @@ const Zkp2pProvider = ({
       `);
       return promise;
     },
-    [rpcTimeout, prover, gnarkBridge]
+    [rpcTimeout, prover, gnarkBridge, rpcVisible]
   );
 
   const _onRpcMessage = useCallback((e: WebViewMessageEvent) => {
     try {
       const data = JSON.parse(e.nativeEvent.data);
-
-      // Early exit for any non-attestor-core messages that might slip through
       if (!data.module || data.module !== 'attestor-core' || !data.id) {
         return;
       }
-
       const { id, type } = data as RPCResponse;
-
       if (type === 'createClaimStep') {
         const entry = pending.current[id];
-        if (entry?.onStep) {
-          entry.onStep(data as RPCResponse);
-        }
+        if (entry?.onStep) entry.onStep(data as RPCResponse);
       } else if (type === 'createClaimDone') {
         pending.current[id]?.resolve(data as RPCResponse);
         clearTimeout(pending.current[id]?.timeout);
         delete pending.current[id];
+        if (Object.keys(pending.current).length === 0) {
+          if (rpcAutoHideTimerRef.current)
+            clearTimeout(rpcAutoHideTimerRef.current);
+          rpcAutoHideTimerRef.current = setTimeout(() => {
+            setRpcVisible(false);
+            rpcLoadedRef.current = false;
+          }, 300);
+        }
       } else if (type === 'error') {
         logger.error('[zkp2p] RPC error:', data);
-
-        // RPC errors come in format: {type: 'error', data: {message: '...', stack: '...'}}
         const errorMessage = (data as any).data?.message || 'Unknown error';
         const error = new Error(errorMessage);
-
-        if ((data as any).data?.stack) {
-          error.stack = (data as any).data.stack;
-        }
-
+        if ((data as any).data?.stack) error.stack = (data as any).data.stack;
         (error as any).rawData = data;
-
         const entry = pending.current[id];
         entry?.reject(error);
         if (entry?.timeout) clearTimeout(entry.timeout as any);
         delete pending.current[id];
+        if (Object.keys(pending.current).length === 0) {
+          if (rpcAutoHideTimerRef.current)
+            clearTimeout(rpcAutoHideTimerRef.current);
+          rpcAutoHideTimerRef.current = setTimeout(() => {
+            setRpcVisible(false);
+            rpcLoadedRef.current = false;
+          }, 300);
+        }
       }
     } catch (error) {
       logger.error('[zkp2p] Failed to process WebView message:', error);
@@ -898,6 +963,12 @@ const Zkp2pProvider = ({
     ref: rpcWebViewRef,
     witnessUrl,
     onMessage: _onRpcMessage,
+    onLoad: () => {
+      rpcLoadedRef.current = true;
+      const resolvers = rpcReadyResolversRef.current.splice(0);
+      resolvers.forEach((r) => r());
+      logger.info('[RPCWebView] onLoad (ready)');
+    },
     gnarkBridge,
   } as const;
 
@@ -918,6 +989,16 @@ const Zkp2pProvider = ({
         } catch {}
       });
     } catch {}
+    if (count > 0) {
+      if (rpcAutoHideTimerRef.current)
+        clearTimeout(rpcAutoHideTimerRef.current);
+      rpcAutoHideTimerRef.current = setTimeout(() => {
+        if (Object.keys(pending.current).length === 0) {
+          setRpcVisible(false);
+          rpcLoadedRef.current = false;
+        }
+      }, 300);
+    }
     return count;
   }, []);
 
@@ -1123,8 +1204,6 @@ const Zkp2pProvider = ({
         if (sid !== sessionIdRef.current) throw err;
         dispatch({ type: 'PROOF_FAILURE', error: err as Error });
         throw err;
-      } finally {
-        setRpcKey((k) => k + 1);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1379,23 +1458,6 @@ const Zkp2pProvider = ({
   );
 
   /*
-   * Closes the auth webview
-   */
-  const closeAuthWebView = () => {
-    // Animate closing
-    Animated.timing(openAnimation, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: false,
-    }).start(() => {
-      setAuthWebViewProps(null);
-      setIsWebViewMinimized(false);
-      slideAnimation.setValue(0);
-      dispatch({ type: 'AUTH_CLOSE' });
-    });
-  };
-
-  /*
    * Minimizes the auth webview
    */
   const minimizeAuthWebView = () => {
@@ -1444,7 +1506,6 @@ const Zkp2pProvider = ({
       if (aborted > 0) {
         logger.info('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
       }
-      setRpcKey((k) => k + 1);
 
       // Reset in-memory state
       setMetadataList([]);
@@ -1452,15 +1513,10 @@ const Zkp2pProvider = ({
       setProofData([]);
       setAutoGenerateOptions(null);
       setLastProofItemIndex(0);
-      setAuthWebViewProps(null);
-      setIsWebViewMinimized(false);
-      try {
-        slideAnimation.setValue(0);
-      } catch {}
-      try {
-        // Keep webview closed after reset
-        openAnimation.setValue(1);
-      } catch {}
+      closeAuthWebView(() => {
+        setRpcVisible(false);
+        rpcLoadedRef.current = false;
+      });
 
       // Reset flow reducer to initial
       dispatch({ type: 'RESET' });
@@ -1473,11 +1529,8 @@ const Zkp2pProvider = ({
     setMetadataList,
     setInterceptedPayload,
     setProofData,
-    setAuthWebViewProps,
-    setIsWebViewMinimized,
-    slideAnimation,
-    openAnimation,
     dispatch,
+    closeAuthWebView,
   ]);
 
   // ==========================================================================
@@ -1624,6 +1677,8 @@ const Zkp2pProvider = ({
             >
               <InterceptWebView
                 ref={authWebViewRef}
+                nativeID="auth-webview"
+                testID="auth-webview"
                 {...authWebViewProps}
                 style={styles.nativeWebview}
               />
@@ -1631,7 +1686,7 @@ const Zkp2pProvider = ({
           </View>
         </Animated.View>
       )}
-      <RPCWebView key={rpcKey} {...rpcWebViewProps} />
+      {rpcVisible && <RPCWebView key={rpcKey} {...rpcWebViewProps} />}
 
       {/* Proof Generation Spinner */}
       {(flowState === 'proofGenerating' ||
@@ -1680,7 +1735,6 @@ const Zkp2pProvider = ({
                       'pending RPC request(s)'
                     );
                   }
-                  setRpcKey((k) => k + 1);
                 }}
               >
                 <Text style={styles.proofSpinnerExitText}>×</Text>

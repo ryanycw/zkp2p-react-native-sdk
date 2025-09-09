@@ -15,7 +15,13 @@ interface RPCWebViewProps {
 export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
   ({ onMessage, onLoad, onError, witnessUrl, gnarkBridge }, ref) => {
     const internalWebViewRef = useRef<WebView>(null);
-    // Allow parallel gnark requests as directed by concurrency settings
+    // Lifecycle logs for debugging mount/unmount
+    useEffect(() => {
+      logger.info('[RPCWebView] mounted');
+      return () => {
+        logger.info('[RPCWebView] unmounted');
+      };
+    }, []);
 
     useEffect(() => {
       if (ref) {
@@ -277,6 +283,8 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
         {/* @ts-ignore - React 19 type incompatibility with react-native-webview */}
         <WebView
           ref={internalWebViewRef}
+          nativeID="rpc-webview"
+          testID="rpc-webview"
           source={{ uri: `${witnessUrl}/browser-rpc` }}
           originWhitelist={['*']}
           javaScriptEnabled={true}

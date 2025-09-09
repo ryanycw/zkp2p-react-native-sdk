@@ -278,10 +278,7 @@ export type ValidatePayeeDetailsRequest = {
 export type ValidatePayeeDetailsResponse = {
   success: boolean;
   message: string;
-  responseObject: {
-    isValid: boolean;
-    errors?: string[];
-  };
+  responseObject: boolean;
   statusCode: number;
 };
 

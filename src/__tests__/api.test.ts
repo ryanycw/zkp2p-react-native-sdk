@@ -219,20 +219,17 @@ describe('apiValidatePayeeDetails', () => {
     );
   });
 
-  it('should return validation response with errors when invalid', async () => {
-    const errorResponse = {
+  it('should return validation boolean response when invalid', async () => {
+    const apiResponse = {
       success: false,
       message: 'Validation failed',
-      responseObject: {
-        isValid: false,
-        errors: ['Invalid username format', 'ID does not match'],
-      },
+      responseObject: false,
       statusCode: 200,
     };
 
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
-      json: async () => errorResponse,
+      json: async () => apiResponse,
     });
 
     const request: ValidatePayeeDetailsRequest = {
@@ -249,9 +246,8 @@ describe('apiValidatePayeeDetails', () => {
       mockBaseUrl
     );
 
-    expect(result).toEqual(errorResponse);
-    expect(result.responseObject.isValid).toBe(false);
-    expect(result.responseObject.errors).toHaveLength(2);
+    expect(result).toEqual(apiResponse);
+    expect(result.responseObject).toBe(false);
   });
 });
 
