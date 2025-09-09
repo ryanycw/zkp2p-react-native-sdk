@@ -47,10 +47,20 @@ describe('Currency Utils', () => {
 
   describe('currencies array', () => {
     it('should contain all currency values', () => {
-      expect(currencies).toHaveLength(25);
+      expect(currencies).toHaveLength(Object.values(Currency).length);
       expect(currencies).toContain('USD');
       expect(currencies).toContain('EUR');
       expect(currencies).toContain('GBP');
+      // Spot-check a few newly added currencies
+      expect(currencies).toContain('CZK');
+      expect(currencies).toContain('DKK');
+      expect(currencies).toContain('HUF');
+      expect(currencies).toContain('INR');
+      expect(currencies).toContain('NOK');
+      expect(currencies).toContain('PHP');
+      expect(currencies).toContain('PLN');
+      expect(currencies).toContain('RON');
+      expect(currencies).toContain('SEK');
     });
   });
 
