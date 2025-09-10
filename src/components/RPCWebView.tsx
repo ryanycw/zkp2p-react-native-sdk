@@ -283,8 +283,6 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
         {/* @ts-ignore - React 19 type incompatibility with react-native-webview */}
         <WebView
           ref={internalWebViewRef}
-          nativeID="rpc-webview"
-          testID="rpc-webview"
           source={{ uri: `${witnessUrl}/browser-rpc` }}
           originWhitelist={['*']}
           javaScriptEnabled={true}
