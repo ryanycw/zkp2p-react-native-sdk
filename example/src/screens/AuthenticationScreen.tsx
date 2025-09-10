@@ -43,9 +43,9 @@ export const AuthenticationScreen: React.FC<Props> = ({
   const handleSelect = async (platform: string, action: string) => {
     setActivePlatform(platform);
     try {
-      // Wise and Mercado Pago: still use initiate (action step first)
+      // Mercado Pago: still use initiate (action step first)
       // Others: use authenticate() directly
-      const useAuthenticate = platform !== 'wise' && platform !== 'mercadopago';
+      const useAuthenticate = platform !== 'mercadopago';
 
       const authOptions: SDKAuthenticateOptions = {
         autoGenerateProof: autoProofEnabled
@@ -74,12 +74,6 @@ export const AuthenticationScreen: React.FC<Props> = ({
           initiateOptions.initialAction.paymentDetails = {
             RECIPIENT_ID: '0720000791240000001234',
             AMOUNT: '100',
-          };
-        }
-
-        if (platform === 'wise') {
-          initiateOptions.initialAction.paymentDetails = {
-            RECIPIENT_ID: 'alexanders6341',
           };
         }
       }
@@ -232,7 +226,7 @@ export const AuthenticationScreen: React.FC<Props> = ({
               styles.disabled,
           ]}
           disabled={isAuthenticating && activePlatform === 'mercadopago'}
-          onPress={() => handleSelect('mercadopago', 'transfer_mercado_pago')}
+          onPress={() => handleSelect('mercadopago', 'transfer_mercadopago')}
         >
           {isAuthenticating && activePlatform === 'mercadopago' ? (
             <ActivityIndicator color="#fff" />

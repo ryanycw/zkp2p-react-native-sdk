@@ -24,34 +24,59 @@ export async function replayAndResolve(
   target: ReplayTarget,
   userAgent: string
 ): Promise<ResolvedPayload> {
-  console.log('evt', evt);
+  const headers: Record<string, string> = {
+    ...(evt.request.headers || {}),
+    'User-Agent': userAgent,
+    ...(evt.request.cookie ? { Cookie: evt.request.cookie } : {}),
+  };
+  // Ensure we prefer JSON responses when possible
+  if (!headers.Accept) {
+    headers.Accept = 'application/json, text/plain, */*';
+  }
+
   const res = await fetch(target.url, {
     method: (target.method as any) || 'GET',
-    headers: {
-      ...evt.request.headers,
-      'User-Agent': userAgent,
-      ...(evt.request.cookie ? { Cookie: evt.request.cookie } : {}),
-    },
+    headers,
     body: target.body,
     credentials: 'include',
   } as any);
-  console.log('res', res);
+
   if (!res.ok) {
     throw new Error(
       `Failed to fetch transaction data: ${res.status} ${res.statusText}`
     );
   }
-  const bodyJson = await res.json();
+
+  const contentType = (res.headers?.get?.('content-type') || '').toLowerCase();
+  let bodyStr = '';
+  try {
+    bodyStr = await res.text();
+  } catch {
+    bodyStr = '';
+  }
+
+  let bodyJson: any | undefined;
+  if (contentType.includes('json')) {
+    try {
+      bodyJson = JSON.parse(bodyStr);
+    } catch {}
+  } else {
+    // Best-effort: some servers send JSON without a JSON content-type
+    try {
+      bodyJson = JSON.parse(bodyStr);
+    } catch {}
+  }
+
   const updatedPayload: NetworkEvent = {
     ...evt,
     response: {
       url: (res as any).url || evt.response.url,
       status: res.status,
       headers: evt.response.headers,
-      body: JSON.stringify(bodyJson),
+      body: bodyStr,
     },
   };
-  return { bodyStr: JSON.stringify(bodyJson), bodyJson, updatedPayload };
+  return { bodyStr, bodyJson, updatedPayload };
 }
 
 /**

@@ -403,14 +403,30 @@ const Zkp2pProvider = ({
           target,
           getCustomUserAgent(cfg)
         );
-        const bodyJson = resolved.bodyJson ?? JSON.parse(resolved.bodyStr);
+        let bodyJson: any | null = resolved.bodyJson ?? null;
+        if (!bodyJson) {
+          try {
+            const processed = preprocessBody(
+              cfg.metadata.preprocessRegex,
+              resolved.bodyStr
+            );
+            bodyJson = JSON.parse(processed);
+          } catch {
+            bodyJson = null;
+          }
+        }
+
+        if (!bodyJson) {
+          // Could not restore a JSON body (likely HTML login). Consider session invalid.
+          return false;
+        }
         setInterceptedPayload(resolved.updatedPayload);
         setMetadataList(extractMetadata(bodyJson, cfg));
         dispatch({ type: 'AUTH_SUCCESS' });
         return true;
       } catch (e) {
-        // Surface restore errors to caller (_authenticateInternal) to handle
-        throw e;
+        // Network/other errors: treat as not restorable
+        return false;
       }
     },
     [setInterceptedPayload, setMetadataList, dispatch]
@@ -478,7 +494,6 @@ const Zkp2pProvider = ({
           } catch (e) {
             logger.warn('[zkp2p] In-page fallback replay injection failed:', e);
           }
-          // The metadataUrl response will be intercepted and handled in a subsequent call
           return;
         }
 
@@ -587,8 +602,8 @@ const Zkp2pProvider = ({
           return;
         }
       } catch (err) {
-        logger.warn('[zkp2p] Stored session invalid:', err);
-        dispatch({ type: 'SET_AUTH_ERROR', error: err as Error });
+        // Session restore failing (e.g., HTML/redirect) is normal; continue to interactive auth.
+        logger.warn('[zkp2p] Stored session invalid (continuing to auth).');
       }
 
       const webViewProps = _setupAuthWebViewProps(cfg);
