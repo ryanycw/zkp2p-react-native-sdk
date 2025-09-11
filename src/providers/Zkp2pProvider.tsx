@@ -228,10 +228,14 @@ const Zkp2pProvider = ({
   const rpcWebViewRef = useRef<WebView>(null);
   const authWebViewRef = useRef<WebView>(null);
   const isClosingRef = useRef(false);
+  // RPC lifecycle (on-demand mount for proof only)
+  const [rpcVisible, setRpcVisible] = useState(false);
+  const rpcReadyRef = useRef(false);
+  const proofInFlightRef = useRef(false);
+  // Auth modal visibility for slide-in/out animation without Animated.View
+  const [authModalVisible, setAuthModalVisible] = useState(false);
   const pending = useRef<Record<string, PendingEntry>>({});
   const spinAnimation = useRef(new Animated.Value(0)).current;
-  const slideAnimation = useRef(new Animated.Value(0)).current;
-  const openAnimation = useRef(new Animated.Value(1)).current;
   const sessionIdRef = useRef(0);
 
   // ==========================================================================
@@ -297,31 +301,20 @@ const Zkp2pProvider = ({
    */
   const closeAuthWebView = useCallback(
     (shouldResetFlow: boolean = false) => {
-      if (isClosingRef.current) {
-        return;
-      }
+      if (isClosingRef.current) return;
       isClosingRef.current = true;
-      Animated.timing(openAnimation, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: false,
-      }).start(() => {
+      // Trigger slide-out via Modal, then cleanup
+      setAuthModalVisible(false);
+      setTimeout(() => {
         setAuthWebViewProps(null);
         setIsWebViewMinimized(false);
-        slideAnimation.setValue(0);
         if (shouldResetFlow) {
           dispatch({ type: 'AUTH_CLOSE' });
         }
         isClosingRef.current = false;
-      });
+      }, 320);
     },
-    [
-      openAnimation,
-      setAuthWebViewProps,
-      setIsWebViewMinimized,
-      slideAnimation,
-      dispatch,
-    ]
+    [dispatch]
   );
 
   useEffect(() => {
@@ -608,22 +601,13 @@ const Zkp2pProvider = ({
 
       const webViewProps = _setupAuthWebViewProps(cfg);
       setAuthWebViewProps(webViewProps);
-      slideAnimation.setValue(0);
-      openAnimation.setValue(1);
-
-      // Animate webview sliding up from bottom
-      Animated.timing(openAnimation, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
+      setIsWebViewMinimized(false);
+      setAuthModalVisible(true);
     },
     [
       _restoreSessionWith,
       setAuthWebViewProps,
       _setupAuthWebViewProps,
-      slideAnimation,
-      openAnimation,
       dispatch,
       setAutoGenerateOptions,
       closeAuthWebView,
@@ -698,22 +682,13 @@ const Zkp2pProvider = ({
           closeAuthWebView(false);
         },
       });
-      slideAnimation.setValue(0);
-      openAnimation.setValue(1);
-
-      // Animate webview sliding up from bottom
-      Animated.timing(openAnimation, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
+      setIsWebViewMinimized(false);
+      setAuthModalVisible(true);
     },
     [
       setAuthWebViewProps,
       _authenticateInternal,
       _processInjectedScript,
-      slideAnimation,
-      openAnimation,
       dispatch,
       closeAuthWebView,
     ]
@@ -936,7 +911,33 @@ const Zkp2pProvider = ({
     witnessUrl,
     onMessage: _onRpcMessage,
     gnarkBridge,
+    onLoad: () => {
+      rpcReadyRef.current = true;
+      logger.info('[zkp2p] RPC WebView ready');
+    },
   } as const;
+
+  // Ensure the RPC WebView is mounted and ready
+  const ensureRpcReady = useCallback(
+    async (timeoutMs = 5000) => {
+      if (!rpcVisible) {
+        logger.info('[zkp2p] RPC mount requested');
+        setRpcVisible(true);
+      } else {
+        logger.debug('[zkp2p] RPC already visible');
+      }
+      if (rpcReadyRef.current) return;
+      const start = Date.now();
+      for (;;) {
+        if (rpcReadyRef.current) return;
+        if (Date.now() - start > timeoutMs) {
+          throw new Error('RPC initialization timeout');
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    },
+    [rpcVisible]
+  );
 
   // ==========================================================================
   // PROOF GENERATION METHODS
@@ -965,6 +966,11 @@ const Zkp2pProvider = ({
       intentHash: string,
       itemIndex: number = 0
     ) => {
+      if (proofInFlightRef.current) {
+        throw new Error('Proof generation is already in progress');
+      }
+      proofInFlightRef.current = true;
+      logger.info('[zkp2p] Proof start: ensuring RPC ready');
       const sid = sessionIdRef.current;
       if (!payload) throw new Error('No authentication data');
       if (prover !== 'reclaim_snarkjs' && prover !== 'reclaim_gnark') {
@@ -1042,6 +1048,7 @@ const Zkp2pProvider = ({
               ? await calculateGnarkDynamicConcurrency()
               : 1,
         };
+        await ensureRpcReady();
         const res = await _rpcRequest('createClaim', rpc, (stepData) => {
           logger.debug('[zkp2p] Proof generation step:', stepData);
           if (stepData.step?.error) {
@@ -1160,10 +1167,39 @@ const Zkp2pProvider = ({
         if (sid !== sessionIdRef.current) throw err;
         dispatch({ type: 'PROOF_FAILURE', error: err as Error });
         throw err;
+      } finally {
+        // Always tear down RPC channel after proof attempt
+        logger.info('[zkp2p] Proof end: tearing down RPC');
+        try {
+          logger.debug('[zkp2p] RPC teardown: aborting pending');
+          abortAllPending('Proof finished');
+        } catch {}
+        if (gnarkBridge) {
+          try {
+            logger.debug('[zkp2p] RPC teardown: waiting for gnark idle');
+            await gnarkBridge.waitForIdle(2000);
+          } catch {}
+          try {
+            logger.debug('[zkp2p] RPC teardown: cleaning memory');
+            await gnarkBridge.cleanupMemory();
+          } catch {}
+        }
+        logger.info('[zkp2p] RPC WebView unmounting');
+        rpcReadyRef.current = false;
+        setRpcVisible(false);
+        proofInFlightRef.current = false;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [_rpcRequest, witnessUrl, prover, setProofData, gnarkBridge, dispatch]
+    [
+      _rpcRequest,
+      witnessUrl,
+      prover,
+      setProofData,
+      gnarkBridge,
+      dispatch,
+      ensureRpcReady,
+    ]
   );
 
   // Internal helper to generate a single proof without modifying state
@@ -1413,15 +1449,7 @@ const Zkp2pProvider = ({
    * Minimizes the auth webview
    */
   const minimizeAuthWebView = () => {
-    const toValue = isWebViewMinimized ? 0 : 1;
-
-    Animated.timing(slideAnimation, {
-      toValue,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-
-    setIsWebViewMinimized(!isWebViewMinimized);
+    setIsWebViewMinimized((v) => !v);
   };
 
   const clearSession = useCallback(
@@ -1468,6 +1496,11 @@ const Zkp2pProvider = ({
       setLastProofItemIndex(0);
       closeAuthWebView(true);
 
+      logger.info('[zkp2p] Reset: unmounting RPC WebView');
+      rpcReadyRef.current = false;
+      setRpcVisible(false);
+      proofInFlightRef.current = false;
+
       // Reset flow reducer to initial
       dispatch({ type: 'RESET' });
     } catch (e) {
@@ -1487,23 +1520,11 @@ const Zkp2pProvider = ({
   // COMPUTED STYLES
   // ==========================================================================
 
-  const animatedWebViewStyle = useMemo(
-    () => ({
-      height: slideAnimation.interpolate({
-        inputRange: [0, 1],
-        outputRange: [Dimensions.get('window').height * 0.9, 48],
-      }),
-      transform: [
-        {
-          translateY: openAnimation.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0, Dimensions.get('window').height],
-          }),
-        },
-      ],
-    }),
-    [slideAnimation, openAnimation]
-  );
+  const authContainerHeight = useMemo(() => {
+    if (isWebViewMinimized) return 48;
+    const windowH = Dimensions.get('window').height;
+    return Math.floor(windowH * 0.9);
+  }, [isWebViewMinimized]);
 
   // ==========================================================================
   // EFFECTS
@@ -1597,45 +1618,61 @@ const Zkp2pProvider = ({
     >
       {children}
       {authWebViewProps && (
-        <Animated.View
-          style={[styles.nativeWebviewOverlay, animatedWebViewStyle]}
+        <Modal
+          visible={authModalVisible}
+          transparent
+          animationType="slide"
+          presentationStyle="overFullScreen"
+          statusBarTranslucent
+          onRequestClose={() => closeAuthWebView(true)}
         >
-          <View style={styles.nativeWebviewContainer}>
-            <TouchableOpacity
-              style={styles.nativeHeader}
-              onPress={minimizeAuthWebView}
-              activeOpacity={0.9}
-            >
-              <View style={styles.headerContent}>
-                <View style={styles.headerTitleContainer} />
-                <TouchableOpacity
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    // Explicit user close: reset flow to idle
-                    closeAuthWebView(true);
-                  }}
-                  style={styles.nativeCloseButton}
-                >
-                  <Text style={styles.nativeCloseText}>×</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
+          <View
+            style={styles.nativeWebviewOverlay}
+            collapsable={false}
+            accessibilityLabel="ZKP2P Auth Modal"
+          >
             <View
               style={[
-                styles.webviewWrapper,
-                isWebViewMinimized && styles.webviewWrapperHidden,
+                styles.nativeWebviewContainer,
+                { height: authContainerHeight },
               ]}
             >
-              <InterceptWebView
-                ref={authWebViewRef}
-                {...authWebViewProps}
-                style={styles.nativeWebview}
-              />
+              <TouchableOpacity
+                style={styles.nativeHeader}
+                onPress={minimizeAuthWebView}
+                activeOpacity={0.9}
+              >
+                <View style={styles.headerContent}>
+                  <View style={styles.headerTitleContainer} />
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      // Explicit user close: reset flow to idle
+                      closeAuthWebView(true);
+                    }}
+                    style={styles.nativeCloseButton}
+                  >
+                    <Text style={styles.nativeCloseText}>×</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+              <View
+                style={[
+                  styles.webviewWrapper,
+                  isWebViewMinimized && styles.webviewWrapperHidden,
+                ]}
+              >
+                <InterceptWebView
+                  ref={authWebViewRef}
+                  {...authWebViewProps}
+                  style={styles.nativeWebview}
+                />
+              </View>
             </View>
           </View>
-        </Animated.View>
+        </Modal>
       )}
-      <RPCWebView {...rpcWebViewProps} />
+      {rpcVisible && <RPCWebView {...rpcWebViewProps} />}
 
       {/* Proof Generation Spinner */}
       {(flowState === 'proofGenerating' ||
@@ -1811,7 +1848,7 @@ const Zkp2pProvider = ({
 // ============================================================================
 
 const styles = StyleSheet.create({
-  // WebView overlay styles
+  // WebView overlay styles (modal root anchored to bottom)
   nativeWebviewOverlay: {
     position: 'absolute',
     bottom: 0,
