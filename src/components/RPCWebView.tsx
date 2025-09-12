@@ -279,7 +279,13 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
     `;
 
     return (
-      <View style={styles.container}>
+      <View
+        style={styles.container}
+        collapsable={false}
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
         {/* @ts-ignore - React 19 type incompatibility with react-native-webview */}
         <WebView
           ref={internalWebViewRef}

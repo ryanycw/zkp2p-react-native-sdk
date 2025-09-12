@@ -939,6 +939,11 @@ const Zkp2pProvider = ({
     [rpcVisible]
   );
 
+  // If witnessUrl changes, wait for a fresh onLoad before sending RPC
+  useEffect(() => {
+    rpcReadyRef.current = false;
+  }, [witnessUrl]);
+
   // ==========================================================================
   // PROOF GENERATION METHODS
   // ==========================================================================
@@ -1168,25 +1173,22 @@ const Zkp2pProvider = ({
         dispatch({ type: 'PROOF_FAILURE', error: err as Error });
         throw err;
       } finally {
-        // Always tear down RPC channel after proof attempt
-        logger.info('[zkp2p] Proof end: tearing down RPC');
+        // Post-proof cleanup, keep RPC WebView mounted for stability/perf
+        logger.info('[zkp2p] Proof end: cleaning up (persistent RPC)');
         try {
-          logger.debug('[zkp2p] RPC teardown: aborting pending');
+          logger.debug('[zkp2p] RPC cleanup: aborting pending');
           abortAllPending('Proof finished');
         } catch {}
         if (gnarkBridge) {
           try {
-            logger.debug('[zkp2p] RPC teardown: waiting for gnark idle');
+            logger.debug('[zkp2p] RPC cleanup: waiting for gnark idle');
             await gnarkBridge.waitForIdle(2000);
           } catch {}
           try {
-            logger.debug('[zkp2p] RPC teardown: cleaning memory');
+            logger.debug('[zkp2p] RPC cleanup: cleaning memory');
             await gnarkBridge.cleanupMemory();
           } catch {}
         }
-        logger.info('[zkp2p] RPC WebView unmounting');
-        rpcReadyRef.current = false;
-        setRpcVisible(false);
         proofInFlightRef.current = false;
       }
     },
@@ -1457,9 +1459,29 @@ const Zkp2pProvider = ({
       clearInterceptedPayloads?: boolean;
       iosAlsoClearWebKitStore?: boolean;
     }) => {
-      await clearSessionService(options);
+      try {
+        await clearSessionService(options);
+      } finally {
+        // Teardown RPC only on explicit clearSession
+        try {
+          const aborted = abortAllPending('clearSession');
+          if (aborted > 0) {
+            logger.info('[zkp2p] Aborted', aborted, 'pending RPC request(s)');
+          }
+        } catch {}
+        if (gnarkBridge) {
+          try {
+            await gnarkBridge.cancelAllProofs();
+          } catch {}
+          try {
+            await gnarkBridge.cleanupMemory();
+          } catch {}
+        }
+        rpcReadyRef.current = false;
+        setRpcVisible(false);
+      }
     },
-    []
+    [abortAllPending, gnarkBridge]
   );
 
   // ==========================================================================
@@ -1661,6 +1683,12 @@ const Zkp2pProvider = ({
                   styles.webviewWrapper,
                   isWebViewMinimized && styles.webviewWrapperHidden,
                 ]}
+                collapsable={!isWebViewMinimized}
+                pointerEvents={isWebViewMinimized ? 'none' : 'auto'}
+                accessibilityElementsHidden={isWebViewMinimized}
+                importantForAccessibility={
+                  isWebViewMinimized ? 'no-hide-descendants' : 'auto'
+                }
               >
                 <InterceptWebView
                   ref={authWebViewRef}
