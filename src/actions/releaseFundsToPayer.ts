@@ -15,6 +15,7 @@ export async function releaseFundsToPayer(
       functionName: 'releaseFundsToPayer',
       args: [params.intentHash],
       account: walletClient.account,
+      ...(params.txOverrides ?? {}),
     });
 
     const hash = await walletClient.writeContract(request);

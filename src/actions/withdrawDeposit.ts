@@ -15,6 +15,7 @@ export async function withdrawDeposit(
       functionName: 'withdrawDeposit',
       args: [BigInt(params.depositId)],
       account: walletClient.account,
+      ...(params.txOverrides ?? {}),
     });
 
     const hash = await walletClient.writeContract(request);

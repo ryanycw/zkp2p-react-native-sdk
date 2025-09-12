@@ -49,6 +49,7 @@ export async function createDeposit(
         functionName: 'approve',
         args: [escrowAddress as `0x${string}`, params.amount],
         account: walletClient.account,
+        ...(params.txOverrides ?? {}),
       });
 
       const approveHash = await walletClient.writeContract(approveRequest);
@@ -146,6 +147,7 @@ export async function createDeposit(
           currencies,
         ],
         account: walletClient.account,
+        ...(params.txOverrides ?? {}),
       });
 
       hash = await walletClient.writeContract(request);

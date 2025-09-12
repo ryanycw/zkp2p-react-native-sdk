@@ -1,4 +1,4 @@
-import type { WalletClient, Hash } from 'viem';
+import type { WalletClient, Hash, AuthorizationList, AccessList } from 'viem';
 import type { Range } from './contract';
 import type { CurrencyType } from '../utils/currency';
 import type { ReclaimProof } from '../utils/reclaimProof';
@@ -64,6 +64,16 @@ export type TxCallbackParams = {
 
 export type ActionCallback = (params: TxCallbackParams) => void;
 
+// Simple safe overrides (internally constrained to broadly-supported fields)
+export type SafeTxOverrides = {
+  gas?: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+  nonce?: number;
+  accessList?: AccessList;
+  authorizationList?: AuthorizationList;
+};
+
 export type FulfillIntentParams = {
   paymentProofs: ProofData[];
   intentHash: Hash;
@@ -71,6 +81,7 @@ export type FulfillIntentParams = {
   onSuccess?: ActionCallback;
   onError?: (error: Error) => void;
   onMined?: ActionCallback;
+  txOverrides?: SafeTxOverrides;
 };
 
 export type CancelIntentParams = {
@@ -78,6 +89,7 @@ export type CancelIntentParams = {
   onSuccess?: ActionCallback;
   onError?: (error: Error) => void;
   onMined?: ActionCallback;
+  txOverrides?: SafeTxOverrides;
 };
 
 export type ReleaseFundsToPayerParams = {
@@ -85,6 +97,7 @@ export type ReleaseFundsToPayerParams = {
   onSuccess?: ActionCallback;
   onError?: (error: Error) => void;
   onMined?: ActionCallback;
+  txOverrides?: SafeTxOverrides;
 };
 
 export type WithdrawDepositParams = {
@@ -92,6 +105,7 @@ export type WithdrawDepositParams = {
   onSuccess?: ActionCallback;
   onError?: (error: Error) => void;
   onMined?: ActionCallback;
+  txOverrides?: SafeTxOverrides;
 };
 
 export type SignalIntentParams = {
@@ -104,6 +118,7 @@ export type SignalIntentParams = {
   onSuccess?: ActionCallback;
   onError?: (error: Error) => void;
   onMined?: ActionCallback;
+  txOverrides?: SafeTxOverrides;
 };
 
 export type CreateDepositConversionRate = {
@@ -123,6 +138,7 @@ export type CreateDepositParams = {
   onSuccess?: ActionCallback;
   onError?: (error: Error) => void;
   onMined?: ActionCallback;
+  txOverrides?: SafeTxOverrides; // applied to approval and createDeposit
 };
 
 export type IntentSignalRequest = {

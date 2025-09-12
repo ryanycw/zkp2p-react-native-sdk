@@ -39,6 +39,7 @@ export async function fulfillIntent(
       functionName: 'fulfillIntent',
       args: [proofBytes, params.intentHash],
       account: walletClient.account,
+      ...(params.txOverrides ?? {}),
     });
 
     const hash = await walletClient.writeContract(request);

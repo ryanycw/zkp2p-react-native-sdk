@@ -64,6 +64,7 @@ export async function signalIntent(
           intentData.gatingServiceSignature as `0x${string}`,
         ],
         account: walletClient.account,
+        ...(params.txOverrides ?? {}),
       });
 
       hash = await walletClient.writeContract(request);
