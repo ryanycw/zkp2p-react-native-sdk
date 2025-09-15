@@ -338,7 +338,7 @@ function Zkp2pRoot({
           onSkip={onSkip}
         />
       )}
-      configBaseUrl="http://localhost:8080/"
+      // configBaseUrl="http://localhost:8080/"
     >
       <AppContent
         walletClient={walletClient}
