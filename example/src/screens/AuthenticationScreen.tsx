@@ -14,6 +14,8 @@ import type {
   AuthenticateOptions as SDKAuthenticateOptions,
 } from '../../../src/';
 import { useZkp2p } from '../../../src/';
+import { authStorage } from '../storage/secureStorage';
+import { clearAllConsents, clearAllCredentials } from '../../../src/';
 
 interface Props {
   isAuthenticating: boolean;
@@ -38,7 +40,7 @@ export const AuthenticationScreen: React.FC<Props> = ({
 }) => {
   const [activePlatform, setActivePlatform] = useState<string | null>(null);
   const [autoProofEnabled, setAutoProofEnabled] = useState(false);
-  const { clearSession, resetState } = useZkp2p();
+  const { clearSession } = useZkp2p();
 
   const handleSelect = async (platform: string, action: string) => {
     setActivePlatform(platform);
@@ -130,15 +132,31 @@ export const AuthenticationScreen: React.FC<Props> = ({
           style={[styles.button, styles.clearButton]}
           onPress={async () => {
             try {
-              await resetState?.();
-              Alert.alert('SDK Reset', 'Internal SDK state has been reset.');
+              const n = await clearAllConsents(authStorage);
+              Alert.alert('Consent', `Cleared ${n} provider consents.`);
             } catch (e) {
-              console.error('Failed to reset SDK state', e);
-              Alert.alert('Error', 'Failed to reset SDK state.');
+              Alert.alert('Error', 'Failed to clear provider consents.');
             }
           }}
         >
-          <Text style={styles.buttonText}>Reset SDK State</Text>
+          <Text style={styles.buttonText}>Clear All Provider Consents</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, styles.clearButton]}
+          onPress={async () => {
+            try {
+              const n = await clearAllCredentials(authStorage);
+              Alert.alert(
+                'Credentials',
+                `Cleared ${n} stored credential record(s).`
+              );
+            } catch (e) {
+              Alert.alert('Error', 'Failed to clear credentials.');
+            }
+          }}
+        >
+          <Text style={styles.buttonText}>Clear All Credentials</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -338,6 +356,21 @@ const styles = StyleSheet.create({
   },
   clearButton: {
     backgroundColor: '#ff3b30',
+  },
+  acceptButton: {
+    backgroundColor: '#34C759',
+    flex: 1,
+    marginRight: 8,
+  },
+  denyButton: {
+    backgroundColor: '#ff3b30',
+    flex: 1,
+    marginLeft: 8,
+  },
+  consentRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
   },
   disabled: { backgroundColor: '#9bb8ff' },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },

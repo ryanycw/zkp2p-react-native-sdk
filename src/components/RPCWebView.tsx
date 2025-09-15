@@ -36,6 +36,9 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
     const handleMessage = useCallback(
       async (event: WebViewMessageEvent) => {
         try {
+          (event as any)?.persist?.();
+        } catch {}
+        try {
           const data = JSON.parse(event.nativeEvent.data);
 
           if (data.type === 'console') {
@@ -295,9 +298,12 @@ export const RPCWebView = forwardRef<WebView, RPCWebViewProps>(
           onMessage={handleMessage}
           onLoad={onLoad}
           onError={(syntheticEvent) => {
-            const { nativeEvent } = syntheticEvent;
-            logger.error('[RPCWebView] WebView error:', nativeEvent);
-            onError?.(nativeEvent);
+            try {
+              (syntheticEvent as any)?.persist?.();
+            } catch {}
+            const ne = (syntheticEvent as any)?.nativeEvent;
+            logger.error('[RPCWebView] WebView error:', ne);
+            onError?.(ne);
           }}
           injectedJavaScript={injectedJavaScript}
         />

@@ -7,12 +7,34 @@ import type { InterceptWebView } from '@zkp2p/react-native-webview-intercept';
 export interface AuthWVOverrides
   extends Partial<React.ComponentProps<typeof InterceptWebView>> {}
 
+// ----------------------------------------------------------------------------
+// Credentials & Storage (for host-provided secure persistence)
+// ----------------------------------------------------------------------------
+
+export type Credentials = {
+  username?: string;
+  password: string;
+};
+
+export type CredentialsSelectors = {
+  usernameSelector?: string;
+  passwordSelector: string;
+  submitSelector?: string;
+  nextSelector?: string;
+};
+
+// Minimal storage interface implemented by the host app (e.g., via expo-secure-store)
+export interface Storage {
+  get(key: string): unknown | Promise<unknown>;
+  put(key: string, value: unknown): void | Promise<void>;
+  del(key: string): void | Promise<void>;
+  getKeys(): string[] | Promise<string[]>;
+}
+
 // Define options interfaces to match Zkp2pContext.ts
 export interface InitialActionOptions {
   enabled?: boolean;
   paymentDetails?: Record<string, string>; // Generic details for both URL and JS injection
-  // Runtime override for internal vs external action preference.
-  // If provided, this overrides the provider config's mobile.useExternalAction.
   useExternalActionOverride?: boolean;
 }
 
@@ -555,6 +577,13 @@ export interface ProviderSettings {
       actionLink: string;
       appStoreLink?: string;
       playStoreLink?: string;
+    };
+    login?: {
+      usernameSelector?: string;
+      passwordSelector: string;
+      submitSelector?: string;
+      nextSelector?: string;
+      revealTimeoutMs?: number;
     };
   };
 }

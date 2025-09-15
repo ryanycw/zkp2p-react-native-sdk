@@ -11,6 +11,9 @@ import {
   ScrollView,
 } from 'react-native';
 import { Zkp2pProvider, useZkp2p } from '../../src/';
+import ConsentSheet from './components/ConsentSheet';
+// SDK now renders consent sheet internally; external provider not required
+import { authStorage } from './storage/secureStorage';
 import { AuthenticationScreen } from './screens/AuthenticationScreen';
 import { ProofScreen } from './screens/ProofScreen';
 import { ApiFunctionsScreen } from './screens/ApiFunctionsScreen';
@@ -289,6 +292,21 @@ export default function App() {
   }
 
   return (
+    <Zkp2pRoot
+      walletClient={walletClient}
+      setShowWalletSetup={setShowWalletSetup}
+    />
+  );
+}
+
+function Zkp2pRoot({
+  walletClient,
+  setShowWalletSetup,
+}: {
+  walletClient: any;
+  setShowWalletSetup: (v: boolean) => void;
+}) {
+  return (
     <Zkp2pProvider
       walletClient={walletClient}
       apiKey={
@@ -302,6 +320,25 @@ export default function App() {
       rpcTimeout={60000}
       prover="reclaim_gnark"
       logLevel="debug"
+      storage={authStorage}
+      renderConsentSheet={({
+        visible,
+        platform,
+        actionType,
+        onAccept,
+        onDeny,
+        onSkip,
+      }) => (
+        <ConsentSheet
+          visible={visible}
+          platform={platform}
+          actionType={actionType}
+          onAccept={onAccept}
+          onDeny={onDeny}
+          onSkip={onSkip}
+        />
+      )}
+      configBaseUrl="http://localhost:8080/"
     >
       <AppContent
         walletClient={walletClient}

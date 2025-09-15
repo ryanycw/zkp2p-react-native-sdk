@@ -48,6 +48,9 @@ import {
   type FlowState,
   type InitiateOptions,
   type AuthenticateOptions,
+  type Credentials,
+  type CredentialsSelectors,
+  type Storage,
   type AutoGenerateProofOptions,
 } from '../types';
 
@@ -70,7 +73,11 @@ import {
   type ReplayTarget,
   replayAndResolve,
 } from './utils';
-
+import {
+  buildAutoFillAndSubmitScript,
+  buildCaptureOnSubmitScript,
+} from './authScripts';
+import { computeCredentialAndConsentKeys } from './utils';
 import { RPCWebView } from '../components/RPCWebView';
 import Zkp2pContext from './Zkp2pContext';
 import { clearSession as clearSessionService } from '../utils/session';
@@ -79,6 +86,8 @@ import { logger, setLogLevel } from '../utils/logger';
 // ============================================================================
 // TYPES & INTERFACES
 // ============================================================================
+
+type ConsentDecision = 'accept' | 'deny' | 'skip';
 
 interface Zkp2pProviderProps {
   children: ReactNode;
@@ -92,6 +101,15 @@ interface Zkp2pProviderProps {
   environment?: 'production' | 'staging';
   baseApiUrl?: string;
   logLevel?: 'error' | 'info' | 'debug';
+  storage?: Storage;
+  renderConsentSheet?: (props: {
+    visible: boolean;
+    platform: string;
+    actionType: string;
+    onAccept: () => void;
+    onDeny: () => void;
+    onSkip: () => void;
+  }) => React.ReactNode;
 }
 
 // ============================================================================
@@ -186,6 +204,8 @@ const Zkp2pProvider = ({
   environment = 'production',
   baseApiUrl = 'https://api.zkp2p.xyz/v1',
   logLevel,
+  storage,
+  renderConsentSheet,
 }: Zkp2pProviderProps) => {
   // ==========================================================================
   // CLIENT INITIALIZATION
@@ -236,7 +256,73 @@ const Zkp2pProvider = ({
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const pending = useRef<Record<string, PendingEntry>>({});
   const spinAnimation = useRef(new Animated.Value(0)).current;
+  const authRevealAnim = useRef(new Animated.Value(0)).current;
   const sessionIdRef = useRef(0);
+  // Pending captured credentials and per-auth options/context
+  const pendingCredentialsRef = useRef<Credentials | null>(null);
+  const authSelectorsRef = useRef<CredentialsSelectors | null>(null);
+  const authCredentialsRef = useRef<Credentials | null>(null);
+  const credentialsKeyRef = useRef<string | null>(null);
+  const shouldMinimizeOnOpenRef = useRef<boolean>(false);
+  const hiddenAutoLoginTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  // Consent UI state (SDK-provided sheet)
+  const [consentVisible, setConsentVisible] = useState(false);
+  const consentResolverRef = useRef<((d: ConsentDecision) => void) | null>(
+    null
+  );
+  const consentCtxRef = useRef<{ platform: string; actionType: string } | null>(
+    null
+  );
+
+  const _requestConsentInternal = useCallback(
+    (ctx: { platform: string; actionType: string }) => {
+      if (typeof renderConsentSheet !== 'function') {
+        // No renderer provided; skip prompting
+        return Promise.resolve('skip' as ConsentDecision);
+      }
+      consentCtxRef.current = ctx;
+      setConsentVisible(true);
+      return new Promise<ConsentDecision>((resolve) => {
+        consentResolverRef.current = (d: ConsentDecision) => resolve(d);
+      });
+    },
+    [renderConsentSheet]
+  );
+  const hiddenAutoLoginTimeoutMsRef = useRef<number>(3000);
+
+  const clearHiddenAutoTimer = useCallback(() => {
+    try {
+      if (hiddenAutoLoginTimerRef.current) {
+        clearTimeout(hiddenAutoLoginTimerRef.current as any);
+        hiddenAutoLoginTimerRef.current = null;
+      }
+    } catch {}
+  }, []);
+
+  // Apply per-auth login automation state to refs in one place
+  const _applyLoginAutomation = useCallback(
+    (params: {
+      selectors?: CredentialsSelectors | null;
+      credentials?: Credentials | null;
+      credentialsKey?: string | null;
+      revealTimeoutMs?: number | null | undefined;
+    }) => {
+      const { selectors, credentials, credentialsKey, revealTimeoutMs } =
+        params;
+      authSelectorsRef.current = selectors ?? null;
+      authCredentialsRef.current = credentials ?? null;
+      credentialsKeyRef.current = credentialsKey ?? null;
+      shouldMinimizeOnOpenRef.current = !!credentials;
+      hiddenAutoLoginTimeoutMsRef.current = Math.max(
+        0,
+        Number(revealTimeoutMs ?? 3000)
+      );
+    },
+    []
+  );
 
   // ==========================================================================
   // GNARK BRIDGE SETUP
@@ -308,13 +394,15 @@ const Zkp2pProvider = ({
       setTimeout(() => {
         setAuthWebViewProps(null);
         setIsWebViewMinimized(false);
+        clearHiddenAutoTimer();
+        shouldMinimizeOnOpenRef.current = false;
         if (shouldResetFlow) {
           dispatch({ type: 'AUTH_CLOSE' });
         }
         isClosingRef.current = false;
       }, 320);
     },
-    [dispatch]
+    [dispatch, clearHiddenAutoTimer]
   );
 
   useEffect(() => {
@@ -502,12 +590,86 @@ const Zkp2pProvider = ({
           itemExtractionError = new Error('No transactions found');
         }
 
+        // Intercept landed: keep WebView hidden if it was minimized; clear any reveal timer
+        clearHiddenAutoTimer();
+
+        // Mark success and close the auth WebView immediately (do not block on storage/prompt)
         dispatch({
           type: 'AUTH_SUCCESS_WITH_ERROR',
           error: itemExtractionError ?? null,
         });
-        // Close UI but keep flow in 'authenticated'
         closeAuthWebView(false);
+
+        // Handle credential storage and consent asynchronously after UI closes
+        (async () => {
+          try {
+            const effectiveStorage = storage;
+            if (
+              pendingCredentialsRef.current &&
+              credentialsKeyRef.current &&
+              effectiveStorage
+            ) {
+              const { consentKey: providerConsentKey } =
+                computeCredentialAndConsentKeys(cfg);
+              let consentStatus: 'accepted' | 'denied' | null = null;
+              try {
+                const raw: unknown = await (effectiveStorage as any).get(
+                  providerConsentKey
+                );
+                if (typeof raw === 'string') {
+                  const v = raw.trim();
+                  if (v === 'accepted' || v === 'denied') consentStatus = v;
+                }
+              } catch {}
+
+              if (consentStatus === 'accepted') {
+                const toStore = JSON.stringify(pendingCredentialsRef.current);
+                await (effectiveStorage as any).put(
+                  credentialsKeyRef.current,
+                  toStore
+                );
+              } else if (consentStatus === 'denied') {
+                // Skip storing; do not prompt again
+              } else {
+                // Ask host app for consent if available
+                let decision: ConsentDecision = 'skip';
+                try {
+                  decision = await _requestConsentInternal({
+                    platform: cfg.metadata.platform,
+                    actionType: cfg.actionType,
+                  });
+                } catch {}
+
+                if (decision === 'accept') {
+                  const toStore = JSON.stringify(pendingCredentialsRef.current);
+                  await (effectiveStorage as any).put(
+                    credentialsKeyRef.current,
+                    toStore
+                  );
+                  try {
+                    await (effectiveStorage as any).put(
+                      providerConsentKey,
+                      'accepted'
+                    );
+                  } catch {}
+                } else if (decision === 'deny') {
+                  try {
+                    await (effectiveStorage as any).put(
+                      providerConsentKey,
+                      'denied'
+                    );
+                  } catch {}
+                } else {
+                  // skip => leave consent unset
+                }
+              }
+            }
+          } catch (storeErr) {
+            logger.warn('[zkp2p] Failed to export credentials:', storeErr);
+          } finally {
+            pendingCredentialsRef.current = null;
+          }
+        })();
       } catch (err) {
         logger.error(
           '[zkp2p] failed to retrieve/process JSON body (via _handleAuthIntercept):',
@@ -520,7 +682,15 @@ const Zkp2pProvider = ({
         closeAuthWebView(false);
       }
     },
-    [setMetadataList, setInterceptedPayload, dispatch, closeAuthWebView]
+    [
+      setMetadataList,
+      setInterceptedPayload,
+      dispatch,
+      closeAuthWebView,
+      storage,
+      clearHiddenAutoTimer,
+      _requestConsentInternal,
+    ]
   );
 
   const _processInjectedScript = useCallback(
@@ -563,17 +733,67 @@ const Zkp2pProvider = ({
           cfg.mobile?.includeAdditionalCookieDomains ?? [],
         style: { flex: 1 },
         onIntercept: (evt: NetworkEvent) => _handleAuthIntercept(evt, cfg),
-        onError: (e: WebViewErrorEvent) => {
-          logger.error('[zkp2p] Auth webview error:', e.nativeEvent);
+        // Attempt autofill + submit if credentials were provided by host app
+        // Also bind the capture listener after content loads to avoid
+        // overriding InterceptWebView's own beforeContentLoaded injection.
+        onLoadEnd: () => {
+          try {
+            if (authSelectorsRef.current) {
+              const bindCapture = buildCaptureOnSubmitScript(
+                authSelectorsRef.current
+              );
+              authWebViewRef.current?.injectJavaScript?.(bindCapture);
+            }
+            if (authSelectorsRef.current && authCredentialsRef.current) {
+              const js = buildAutoFillAndSubmitScript({
+                selectors: authSelectorsRef.current,
+                credentials: authCredentialsRef.current,
+              });
+              authWebViewRef.current?.injectJavaScript?.(js);
+            }
+          } catch {}
+        },
+        onMessage: ({ nativeEvent }: WebViewMessageEvent) => {
+          try {
+            const raw = (nativeEvent as any)?.data ?? '';
+            const data = JSON.parse(raw || '{}');
+            if (data && data.type === 'credentialSubmit') {
+              const u = String(data.username ?? '');
+              const p = String(data.password ?? '');
+              if (u || p) {
+                const existing = pendingCredentialsRef.current || {
+                  username: '',
+                  password: '',
+                };
+                const merged = {
+                  username: existing.username || u || '',
+                  password: p || existing.password || '',
+                } as Credentials;
+                pendingCredentialsRef.current = merged;
+              }
+            } else if (data && data.type === 'authFormSubmitted') {
+              // Start a short reveal timer only after password submit
+              if (isWebViewMinimized && !hiddenAutoLoginTimerRef.current) {
+                hiddenAutoLoginTimerRef.current = setTimeout(() => {
+                  setIsWebViewMinimized(false);
+                  hiddenAutoLoginTimerRef.current = null;
+                }, hiddenAutoLoginTimeoutMsRef.current);
+              }
+            }
+          } catch {}
+        },
+        onError: ({ nativeEvent, type }: WebViewErrorEvent) => {
+          const ne = nativeEvent as any;
+          logger.error('[zkp2p] Auth webview error:', ne);
           dispatch({
             type: 'SET_AUTH_ERROR',
-            error: new Error(String(e.nativeEvent?.description ?? e.type)),
+            error: new Error(String(ne?.description ?? type)),
           });
           closeAuthWebView(false);
         },
       };
     },
-    [_handleAuthIntercept, dispatch, closeAuthWebView]
+    [_handleAuthIntercept, dispatch, closeAuthWebView, isWebViewMinimized]
   );
 
   const _authenticateInternal = useCallback(
@@ -601,8 +821,19 @@ const Zkp2pProvider = ({
 
       const webViewProps = _setupAuthWebViewProps(cfg);
       setAuthWebViewProps(webViewProps);
-      setIsWebViewMinimized(false);
+      // Minimize if we have credentials to autofill; otherwise show normally
+      const minimize = shouldMinimizeOnOpenRef.current === true;
+      setIsWebViewMinimized(minimize);
       setAuthModalVisible(true);
+      // For hidden auto-login, start the reveal timer immediately as a fallback
+      // (it will also be restarted after password submit by onMessage handler)
+      if (minimize) {
+        clearHiddenAutoTimer();
+        hiddenAutoLoginTimerRef.current = setTimeout(() => {
+          setIsWebViewMinimized(false);
+          hiddenAutoLoginTimerRef.current = null;
+        }, hiddenAutoLoginTimeoutMsRef.current);
+      }
     },
     [
       _restoreSessionWith,
@@ -611,6 +842,7 @@ const Zkp2pProvider = ({
       dispatch,
       setAutoGenerateOptions,
       closeAuthWebView,
+      clearHiddenAutoTimer,
     ]
   );
 
@@ -670,14 +902,14 @@ const Zkp2pProvider = ({
             await _authenticateInternal(cfg, autoGenerateProof);
           }
         },
-        onError: (e: WebViewErrorEvent) => {
+        onError: ({ nativeEvent, type }: WebViewErrorEvent) => {
           logger.error(
             '[zkp2p] InitialAction WebView error:',
-            e.nativeEvent?.description ?? e.type
+            (nativeEvent as any)?.description ?? type
           );
           dispatch({
             type: 'AUTH_FAILURE',
-            error: new Error(String(e.nativeEvent?.description ?? e.type)),
+            error: new Error(String((nativeEvent as any)?.description ?? type)),
           });
           closeAuthWebView(false);
         },
@@ -1432,6 +1664,9 @@ const Zkp2pProvider = ({
       setInterceptedPayload(null);
 
       const { existingProviderConfig, autoGenerateProof } = options;
+
+      const effectiveStorage = storage;
+
       let cfg: ProviderSettings;
       if (existingProviderConfig) {
         cfg = existingProviderConfig;
@@ -1442,9 +1677,64 @@ const Zkp2pProvider = ({
         cfg = await _refetchProviderConfig(platform, actionType);
       }
 
+      const selectors: CredentialsSelectors | null = cfg.mobile?.login
+        ? {
+            usernameSelector: cfg.mobile.login.usernameSelector,
+            passwordSelector: cfg.mobile.login.passwordSelector,
+            submitSelector: cfg.mobile.login.submitSelector,
+            nextSelector: cfg.mobile.login.nextSelector,
+          }
+        : null;
+
+      // Compute a default credential key if not provided
+      const { credKey: computedCredKey } = computeCredentialAndConsentKeys(cfg);
+      const effectiveCredKey = selectors ? computedCredKey : null;
+
+      let effectiveCredentials: Credentials | null = null;
+
+      // If no credentials provided but we have selectors and storage, try to load saved creds
+      if (
+        !effectiveCredentials &&
+        selectors &&
+        effectiveStorage &&
+        effectiveCredKey
+      ) {
+        try {
+          const stored = (await (effectiveStorage as any).get(
+            effectiveCredKey
+          )) as unknown;
+          if (stored) {
+            if (typeof stored === 'string') {
+              try {
+                const parsed = JSON.parse(stored);
+                if (parsed && typeof parsed === 'object') {
+                  effectiveCredentials = parsed as Credentials;
+                }
+              } catch {}
+            } else if (typeof stored === 'object') {
+              effectiveCredentials = stored as Credentials;
+            }
+          }
+        } catch {}
+      }
+
+      _applyLoginAutomation({
+        selectors,
+        credentials: effectiveCredentials,
+        credentialsKey: effectiveCredKey,
+        revealTimeoutMs: (cfg as any)?.mobile?.login?.revealTimeoutMs ?? null,
+      });
+
       await _authenticateInternal(cfg, autoGenerateProof || null);
     },
-    [_refetchProviderConfig, _authenticateInternal, abortAllPending, dispatch]
+    [
+      _refetchProviderConfig,
+      _authenticateInternal,
+      abortAllPending,
+      dispatch,
+      storage,
+      _applyLoginAutomation,
+    ]
   );
 
   /*
@@ -1543,7 +1833,7 @@ const Zkp2pProvider = ({
   // ==========================================================================
 
   const authContainerHeight = useMemo(() => {
-    if (isWebViewMinimized) return 48;
+    if (isWebViewMinimized) return 1;
     const windowH = Dimensions.get('window').height;
     return Math.floor(windowH * 0.9);
   }, [isWebViewMinimized]);
@@ -1607,6 +1897,20 @@ const Zkp2pProvider = ({
     }
   }, [flowState, spinAnimation]);
 
+  // Reveal animation for auth WebView container (used only when revealing from hidden state)
+  useEffect(() => {
+    if (isWebViewMinimized) {
+      authRevealAnim.setValue(0);
+      return;
+    }
+    Animated.timing(authRevealAnim, {
+      toValue: 1,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [isWebViewMinimized, authRevealAnim]);
+
   useEffect(
     () => () => {
       abortAllPending('Component unmounted');
@@ -1639,45 +1943,79 @@ const Zkp2pProvider = ({
       }}
     >
       {children}
+      {typeof renderConsentSheet === 'function' &&
+        renderConsentSheet({
+          visible: consentVisible,
+          platform: consentCtxRef.current?.platform || '',
+          actionType: consentCtxRef.current?.actionType || '',
+          onAccept: () => {
+            setConsentVisible(false);
+            consentResolverRef.current?.('accept');
+          },
+          onDeny: () => {
+            setConsentVisible(false);
+            consentResolverRef.current?.('deny');
+          },
+          onSkip: () => {
+            setConsentVisible(false);
+            consentResolverRef.current?.('skip');
+          },
+        })}
       {authWebViewProps && (
         <Modal
           visible={authModalVisible}
           transparent
-          animationType="slide"
+          animationType={isWebViewMinimized ? 'none' : 'slide'}
           presentationStyle="overFullScreen"
           statusBarTranslucent
           onRequestClose={() => closeAuthWebView(true)}
         >
           <View
-            style={styles.nativeWebviewOverlay}
+            style={[
+              styles.nativeWebviewOverlay,
+              isWebViewMinimized && styles.overlayHidden,
+            ]}
             collapsable={false}
             accessibilityLabel="ZKP2P Auth Modal"
+            pointerEvents={isWebViewMinimized ? 'none' : 'auto'}
           >
-            <View
+            <Animated.View
               style={[
                 styles.nativeWebviewContainer,
                 { height: authContainerHeight },
+                !isWebViewMinimized && {
+                  transform: [
+                    {
+                      translateY: authRevealAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [24, 0],
+                      }),
+                    },
+                  ],
+                },
               ]}
             >
-              <TouchableOpacity
-                style={styles.nativeHeader}
-                onPress={minimizeAuthWebView}
-                activeOpacity={0.9}
-              >
-                <View style={styles.headerContent}>
-                  <View style={styles.headerTitleContainer} />
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      // Explicit user close: reset flow to idle
-                      closeAuthWebView(true);
-                    }}
-                    style={styles.nativeCloseButton}
-                  >
-                    <Text style={styles.nativeCloseText}>×</Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
+              {!isWebViewMinimized && (
+                <TouchableOpacity
+                  style={styles.nativeHeader}
+                  onPress={minimizeAuthWebView}
+                  activeOpacity={0.9}
+                >
+                  <View style={styles.headerContent}>
+                    <View style={styles.headerTitleContainer} />
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        // Explicit user close: reset flow to idle
+                        closeAuthWebView(true);
+                      }}
+                      style={styles.nativeCloseButton}
+                    >
+                      <Text style={styles.nativeCloseText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              )}
               <View
                 style={[
                   styles.webviewWrapper,
@@ -1696,7 +2034,7 @@ const Zkp2pProvider = ({
                   style={styles.nativeWebview}
                 />
               </View>
-            </View>
+            </Animated.View>
           </View>
         </Modal>
       )}
@@ -1883,6 +2221,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 999,
+  },
+  overlayHidden: {
+    opacity: 0,
   },
   nativeWebviewContainer: {
     flex: 1,

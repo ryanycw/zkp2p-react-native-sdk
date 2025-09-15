@@ -9,6 +9,13 @@ export { currencyInfo } from './utils/currency';
 export { apiGetOwnerDeposits, apiGetIntentsByTaker } from './adapters/api';
 export { setLogLevel } from './utils/logger';
 export type { LogLevel } from './utils/logger';
+export {
+  clearAllCredentials,
+  clearAllConsents,
+  clearProviderCredentials,
+  clearProviderConsent,
+  getProviderConsent,
+} from './utils/storage';
 
 // Error handling exports
 export {
@@ -29,6 +36,9 @@ export type {
   FlowState,
   InitiateOptions,
   AuthenticateOptions,
+  Credentials,
+  CredentialsSelectors,
+  Storage,
   AutoGenerateProofOptions,
   SignalIntentParams,
   FulfillIntentParams,

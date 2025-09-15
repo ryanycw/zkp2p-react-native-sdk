@@ -100,6 +100,8 @@ function PaymentFlow() {
 | `baseApiUrl` | `string` | `'https://api.zkp2p.xyz/v1'` | ZKP2P API base URL |
 | `rpcTimeout` | `number` | `30000` | RPC timeout in milliseconds |
 | `configBaseUrl` | `string` | `'https://raw.githubusercontent.com/zkp2p/providers/main/'` | Provider configuration base URL |
+| `storage` | `Storage` | Optional | App-provided secure storage instance (e.g., SecureStore). Required to persist credentials/consent. |
+| `renderConsentSheet` | `(props) => ReactNode` | Optional | If provided, SDK renders this after visible login when consent is unset. Your component must call `onAccept` / `onSkip` / `onDeny`. |
 
 ### Core Flow Functions
 
@@ -180,6 +182,57 @@ await authenticate('venmo', 'transfer_venmo', {
 });
 
 Note: Both `initiate(...)` and `authenticate(...)` start a new session and clear `proofData`, `metadataList`, and `interceptedPayload` to ensure no stale state carries into the new flow.
+
+### Credential Storage & Consent (SDK-managed)
+
+The SDK can store credentials (username/password) per provider/action when the user consents. You supply:
+
+- `storage`: a `Storage` implementation (e.g., backed by SecureStore or AsyncStorage) via `Zkp2pProvider`.
+- `renderConsentSheet`: an app-owned bottom sheet or modal. The SDK will call it after a successful visible login when consent is unset. You call back:
+  - `onAccept` → SDK stores credentials and writes provider consent.
+  - `onSkip` → SDK does not store; consent remains unset (prompt again next time).
+  - `onDeny` → SDK writes provider consent = 'denied' (no further prompts).
+
+Keys used internally (no need to manage these directly):
+- Credentials: `zkp2p:cred:{platform}:{actionType}`
+- Consent: `zkp2p_consent_{keccak256(platform:actionType:url)}`
+
+Provider config must include login selectors. Optionally set a reveal timeout for invisible autofill flows:
+
+```jsonc
+{
+  "mobile": {
+    "login": {
+      "usernameSelector": "#email, input[name=\"email\"]",
+      "passwordSelector": "#password, input[name=\"password\"][type=\"password\"]",
+      "submitSelector": "button[type=\"submit\"]",
+      "revealTimeoutMs": 3000 // how long to keep the WebView minimized after submit before revealing
+    }
+  }
+}
+```
+
+Exposing helpers (optional):
+
+```ts
+import {
+  clearAllCredentials,
+  clearAllConsents,
+  clearProviderCredentials,
+  clearProviderConsent,
+  getProviderConsent,
+} from '@zkp2p/zkp2p-react-native-sdk';
+
+await clearAllCredentials(storage);
+await clearAllConsents(storage);
+await clearProviderCredentials(storage, 'venmo', 'transfer_venmo');
+await clearProviderConsent(storage, providerCfg);
+const consent = await getProviderConsent(storage, providerCfg); // 'accepted' | 'denied' | null
+```
+
+Notes:
+- SDK no longer accepts `loginAutomation` or `credentialsKey` in `authenticate(...)` — selectors live in provider config, and keys are computed internally.
+- WebView closes immediately on intercept success; consent prompt (your renderer) appears after.
 ```
 
 #### 5. `fulfillIntent(args)`

@@ -288,3 +288,35 @@ export async function loadInterceptedPayload(
   const raw = await AsyncStorage.getItem(key);
   return raw ? JSON.parse(raw) : null;
 }
+
+export function computeCredentialsKey(
+  platform: string,
+  actionType: string,
+  namespace: string = 'cred'
+): string {
+  return `${namespace}:${platform}:${actionType}`;
+}
+
+// Build a hashed consent key so scope is unique per (platform, actionType, url)
+export function computeConsentStorageKey(
+  cfg: ProviderSettings,
+  namespace: string = 'consent'
+): string {
+  const raw = `${cfg.metadata.platform}:${cfg.actionType}:${cfg.url || cfg.authLink || ''}`;
+  const hash = keccak256(raw);
+  return `zkp2p_${namespace}_${hash}`;
+}
+
+export function computeCredentialAndConsentKeys(cfg: ProviderSettings): {
+  credKey: string;
+  consentKey: string;
+} {
+  return {
+    credKey: computeCredentialsKey(
+      cfg.metadata.platform,
+      cfg.actionType,
+      'zkp2p:cred'
+    ),
+    consentKey: computeConsentStorageKey(cfg, 'consent'),
+  };
+}
