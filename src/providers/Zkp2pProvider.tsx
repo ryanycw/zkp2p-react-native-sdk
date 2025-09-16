@@ -548,7 +548,14 @@ const Zkp2pProvider = ({
             jsonBody = {};
           }
           effectivePayload = evt;
-          await saveInterceptedPayload(cfg, effectivePayload);
+          const sanitizedPayload: NetworkEvent = {
+            ...effectivePayload,
+            response: {
+              ...effectivePayload.response,
+              body: null,
+            },
+          };
+          await saveInterceptedPayload(cfg, sanitizedPayload);
         } else {
           // Fallback urlRegex hit: perform an in-page XHR to metadataUrl (or cfg.url)
           const url = cfg.metadata.metadataUrl || cfg.url;
@@ -1553,10 +1560,9 @@ const Zkp2pProvider = ({
           targetIndex
         );
 
-        if (flowState === 'proofGeneratedSuccess' && proofData.length > 0) {
-          // For backward compatibility, pass the first proof if only one exists
-          // Otherwise pass the entire array
-          const proofToPass = proofData.length === 1 ? proofData[0] : proofData;
+        if (Array.isArray(result) && result.length > 0) {
+          // For backward compatibility emit the first proof when only one exists
+          const proofToPass = result.length === 1 ? result[0] : result;
           options.onProofGenerated?.(proofToPass as any);
         }
 
@@ -1568,7 +1574,7 @@ const Zkp2pProvider = ({
         return null;
       }
     },
-    [generateProof, flowState, proofData]
+    [generateProof]
   );
 
   // ==========================================================================

@@ -1,6 +1,7 @@
 import { JSONPath } from 'jsonpath-plus';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { keccak256 } from '../utils/keccak';
+import { logger } from '../utils/logger';
 import type {
   ProviderSettings,
   ExtractedMetadataList,
@@ -276,8 +277,15 @@ export async function saveInterceptedPayload(
   cfg: ProviderSettings,
   evt: NetworkEvent
 ): Promise<void> {
-  const key = computeInterceptStorageKey(cfg);
-  await AsyncStorage.setItem(key, safeStringify(evt));
+  try {
+    const key = computeInterceptStorageKey(cfg);
+    await AsyncStorage.setItem(key, safeStringify(evt));
+  } catch (error) {
+    logger.warn(
+      '[zkp2p] Failed to persist intercepted payload (continuing without cache):',
+      error
+    );
+  }
 }
 
 // Attempt to load a previously stored intercepted payload for this provider
