@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { Zkp2pProvider, useZkp2p } from '../../src/';
 import ConsentSheet from './components/ConsentSheet';
-// SDK now renders consent sheet internally; external provider not required
 import { authStorage } from './storage/secureStorage';
 import { AuthenticationScreen } from './screens/AuthenticationScreen';
 import { ProofScreen } from './screens/ProofScreen';

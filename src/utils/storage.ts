@@ -4,7 +4,10 @@ import {
   computeCredentialAndConsentKeys,
 } from '../providers/utils';
 
-const isCredKey = (k: string) => k.startsWith('zkp2p:cred:');
+const CREDENTIAL_PREFIX = 'zkp2p_cred_';
+
+const isCredKey = (k: string) =>
+  typeof k === 'string' && k.startsWith(CREDENTIAL_PREFIX);
 const isConsentKey = (k: string) => k.startsWith('zkp2p_consent_');
 
 export async function clearAllCredentials(storage: Storage): Promise<number> {
@@ -37,10 +40,9 @@ export async function clearAllConsents(storage: Storage): Promise<number> {
 
 export async function clearProviderCredentials(
   storage: Storage,
-  platform: string,
-  actionType: string
+  cfg: ProviderSettings
 ): Promise<boolean> {
-  const key = computeCredentialsKey(platform, actionType, 'zkp2p:cred');
+  const key = computeCredentialsKey(cfg);
   try {
     await storage.del(key);
     return true;

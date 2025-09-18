@@ -43,6 +43,13 @@ export interface Zkp2pValues {
   ) => Promise<ProofData[]>;
   proofData: ProofData[];
   zkp2pClient: Zkp2pClient | null;
+  clearAllCredentials: () => Promise<number>;
+  clearAllConsents: () => Promise<number>;
+  clearProviderCredentials: (cfg: ProviderSettings) => Promise<boolean>;
+  clearProviderConsent: (cfg: ProviderSettings) => Promise<boolean>;
+  getProviderConsent: (
+    cfg: ProviderSettings
+  ) => Promise<'accepted' | 'denied' | null>;
 }
 
 const Zkp2pContext = React.createContext<Zkp2pValues>({
@@ -57,6 +64,11 @@ const Zkp2pContext = React.createContext<Zkp2pValues>({
   proofData: [],
   zkp2pClient: null,
   resetState: undefined,
+  clearAllCredentials: async () => 0,
+  clearAllConsents: async () => 0,
+  clearProviderCredentials: async () => false,
+  clearProviderConsent: async () => false,
+  getProviderConsent: async () => null,
 });
 
 export default Zkp2pContext;

@@ -81,6 +81,13 @@ import { computeCredentialAndConsentKeys } from './utils';
 import { RPCWebView } from '../components/RPCWebView';
 import Zkp2pContext from './Zkp2pContext';
 import { clearSession as clearSessionService } from '../utils/session';
+import {
+  clearAllCredentials as clearAllCredentialsUtil,
+  clearAllConsents as clearAllConsentsUtil,
+  clearProviderCredentials as clearProviderCredentialsUtil,
+  clearProviderConsent as clearProviderConsentUtil,
+  getProviderConsent as getProviderConsentUtil,
+} from '../utils/storage';
 import { logger, setLogLevel } from '../utils/logger';
 
 // ============================================================================
@@ -322,6 +329,60 @@ const Zkp2pProvider = ({
       );
     },
     []
+  );
+
+  const clearStoredCredentials = useCallback(async () => {
+    if (!storage) return 0;
+    try {
+      return await clearAllCredentialsUtil(storage);
+    } catch {
+      return 0;
+    }
+  }, [storage]);
+
+  const clearStoredConsents = useCallback(async () => {
+    if (!storage) return 0;
+    try {
+      return await clearAllConsentsUtil(storage);
+    } catch {
+      return 0;
+    }
+  }, [storage]);
+
+  const clearProviderStoredCredentials = useCallback(
+    async (cfg: ProviderSettings) => {
+      if (!storage) return false;
+      try {
+        return await clearProviderCredentialsUtil(storage, cfg);
+      } catch {
+        return false;
+      }
+    },
+    [storage]
+  );
+
+  const clearProviderStoredConsent = useCallback(
+    async (cfg: ProviderSettings) => {
+      if (!storage) return false;
+      try {
+        return await clearProviderConsentUtil(storage, cfg);
+      } catch {
+        return false;
+      }
+    },
+    [storage]
+  );
+
+  const getStoredProviderConsent = useCallback(
+    async (cfg: ProviderSettings) => {
+      if (!storage) return null;
+      try {
+        return await getProviderConsentUtil(storage, cfg);
+      } catch {
+        return null;
+      }
+    },
+    [storage]
   );
 
   // ==========================================================================
@@ -616,8 +677,20 @@ const Zkp2pProvider = ({
               credentialsKeyRef.current &&
               effectiveStorage
             ) {
-              const { consentKey: providerConsentKey } =
-                computeCredentialAndConsentKeys(cfg);
+              const {
+                consentKey: providerConsentKey,
+                credKey: providerCredKey,
+              } = computeCredentialAndConsentKeys(cfg);
+              const persistCredentials = async () => {
+                if (!pendingCredentialsRef.current) return;
+                const toStore = JSON.stringify(pendingCredentialsRef.current);
+                const targetKey =
+                  credentialsKeyRef.current ?? providerCredKey ?? null;
+                if (!targetKey) return;
+                try {
+                  await (effectiveStorage as any).put(targetKey, toStore);
+                } catch {}
+              };
               let consentStatus: 'accepted' | 'denied' | null = null;
               try {
                 const raw: unknown = await (effectiveStorage as any).get(
@@ -630,11 +703,7 @@ const Zkp2pProvider = ({
               } catch {}
 
               if (consentStatus === 'accepted') {
-                const toStore = JSON.stringify(pendingCredentialsRef.current);
-                await (effectiveStorage as any).put(
-                  credentialsKeyRef.current,
-                  toStore
-                );
+                await persistCredentials();
               } else if (consentStatus === 'denied') {
                 // Skip storing; do not prompt again
               } else {
@@ -648,11 +717,7 @@ const Zkp2pProvider = ({
                 } catch {}
 
                 if (decision === 'accept') {
-                  const toStore = JSON.stringify(pendingCredentialsRef.current);
-                  await (effectiveStorage as any).put(
-                    credentialsKeyRef.current,
-                    toStore
-                  );
+                  await persistCredentials();
                   try {
                     await (effectiveStorage as any).put(
                       providerConsentKey,
@@ -1706,20 +1771,16 @@ const Zkp2pProvider = ({
         effectiveCredKey
       ) {
         try {
-          const stored = (await (effectiveStorage as any).get(
-            effectiveCredKey
-          )) as unknown;
-          if (stored) {
-            if (typeof stored === 'string') {
-              try {
-                const parsed = JSON.parse(stored);
-                if (parsed && typeof parsed === 'object') {
-                  effectiveCredentials = parsed as Credentials;
-                }
-              } catch {}
-            } else if (typeof stored === 'object') {
-              effectiveCredentials = stored as Credentials;
-            }
+          const stored = await (effectiveStorage as any).get(effectiveCredKey);
+          if (typeof stored === 'string') {
+            try {
+              const parsed = JSON.parse(stored);
+              if (parsed && typeof parsed === 'object') {
+                effectiveCredentials = parsed as Credentials;
+              }
+            } catch {}
+          } else if (typeof stored === 'object') {
+            effectiveCredentials = stored as Credentials;
           }
         } catch {}
       }
@@ -1946,6 +2007,11 @@ const Zkp2pProvider = ({
         zkp2pClient,
         clearSession,
         resetState,
+        clearAllCredentials: clearStoredCredentials,
+        clearAllConsents: clearStoredConsents,
+        clearProviderCredentials: clearProviderStoredCredentials,
+        clearProviderConsent: clearProviderStoredConsent,
+        getProviderConsent: getStoredProviderConsent,
       }}
     >
       {children}

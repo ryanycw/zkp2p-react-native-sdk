@@ -192,9 +192,8 @@ The SDK can store credentials (username/password) per provider/action when the u
   - `onAccept` → SDK stores credentials and writes provider consent.
   - `onSkip` → SDK does not store; consent remains unset (prompt again next time).
   - `onDeny` → SDK writes provider consent = 'denied' (no further prompts).
-
 Keys used internally (no need to manage these directly):
-- Credentials: `zkp2p:cred:{platform}:{actionType}`
+- Credentials: `zkp2p_cred_{keccak256(platform:actionType:url)}`
 - Consent: `zkp2p_consent_{keccak256(platform:actionType:url)}`
 
 Provider config must include login selectors. Optionally set a reveal timeout for invisible autofill flows:
@@ -215,19 +214,29 @@ Provider config must include login selectors. Optionally set a reveal timeout fo
 Exposing helpers (optional):
 
 ```ts
-import {
-  clearAllCredentials,
-  clearAllConsents,
-  clearProviderCredentials,
-  clearProviderConsent,
-  getProviderConsent,
-} from '@zkp2p/zkp2p-react-native-sdk';
+import { useZkp2p } from '@zkp2p/zkp2p-react-native-sdk';
+import type { ProviderSettings } from '@zkp2p/zkp2p-react-native-sdk';
 
-await clearAllCredentials(storage);
-await clearAllConsents(storage);
-await clearProviderCredentials(storage, 'venmo', 'transfer_venmo');
-await clearProviderConsent(storage, providerCfg);
-const consent = await getProviderConsent(storage, providerCfg); // 'accepted' | 'denied' | null
+const ExampleComponent = ({ providerCfg }: { providerCfg: ProviderSettings }) => {
+  const {
+    clearAllCredentials,
+    clearAllConsents,
+    clearProviderCredentials,
+    clearProviderConsent,
+    getProviderConsent,
+  } = useZkp2p();
+
+  const handleClear = async () => {
+    await clearAllCredentials();
+    await clearAllConsents();
+    await clearProviderCredentials(providerCfg);
+    await clearProviderConsent(providerCfg);
+    const consent = await getProviderConsent(providerCfg);
+    console.log('Current consent', consent);
+  };
+
+  // ...
+};
 ```
 
 Notes:
