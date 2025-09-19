@@ -76,15 +76,11 @@ export function ApiFunctionsScreen({
   };
 
   const fetchDeposits = useCallback(async () => {
-    if (!zkp2pClient?.walletClient?.account) return;
+    const accountAddress = zkp2pClient?.walletClient?.account?.address;
+    if (!accountAddress) return;
     try {
-      console.log(
-        'Fetching deposits for address:',
-        zkp2pClient.walletClient.account.address
-      );
-      const result = await zkp2pClient.getAccountDeposits(
-        zkp2pClient.walletClient.account.address
-      );
+      console.log('Fetching deposits for address:', accountAddress);
+      const result = await zkp2pClient.getAccountDeposits(accountAddress);
       setDeposits(result || []);
     } catch (error) {
       console.error('Error fetching deposits:', error);
@@ -93,11 +89,10 @@ export function ApiFunctionsScreen({
   }, [zkp2pClient]);
 
   const fetchIntents = useCallback(async () => {
-    if (!zkp2pClient?.walletClient?.account) return;
+    const accountAddress = zkp2pClient?.walletClient?.account?.address;
+    if (!accountAddress) return;
     try {
-      const result = await zkp2pClient.getAccountIntent(
-        zkp2pClient.walletClient.account.address
-      );
+      const result = await zkp2pClient.getAccountIntent(accountAddress);
       setIntent(result);
 
       // If we have an intent, fetch the payee details to get venmo username
@@ -211,7 +206,10 @@ export function ApiFunctionsScreen({
   ]);
 
   const handleCreateDeposit = async () => {
-    if (!zkp2pClient) return;
+    if (!zkp2pClient?.walletClient?.account) {
+      console.warn('Wallet connection required to create a deposit.');
+      return;
+    }
     setIsDepositLoading(true);
     setDepositHash(null);
     try {
@@ -269,7 +267,10 @@ export function ApiFunctionsScreen({
   };
 
   const handleSignalIntent = async () => {
-    if (!zkp2pClient || !firstActiveDeposit) return;
+    if (!zkp2pClient?.walletClient?.account || !firstActiveDeposit) {
+      console.warn('Wallet connection required to signal an intent.');
+      return;
+    }
     setIsIntentLoading(true);
     setIntentTransactionHash(null);
     const payeeDetailsHash = getPayeeDetailsHash();
@@ -284,7 +285,7 @@ export function ApiFunctionsScreen({
         depositId: firstActiveDeposit.depositId.toString(),
         tokenAmount: '1000000',
         payeeDetails: payeeDetailsHash,
-        toAddress: zkp2pClient.walletClient?.account?.address as `0x${string}`,
+        toAddress: zkp2pClient.walletClient.account.address as `0x${string}`,
         currency: currencyInfo.USD?.currency as string,
         onSuccess: (data) => {
           setIntentTransactionHash(data.hash);
@@ -306,7 +307,10 @@ export function ApiFunctionsScreen({
   };
 
   const handleWithdrawDeposit = async (depositId: string) => {
-    if (!zkp2pClient) return;
+    if (!zkp2pClient?.walletClient?.account) {
+      console.warn('Wallet connection required to withdraw a deposit.');
+      return;
+    }
     setIsWithdrawLoading(true);
     try {
       const params: WithdrawDepositParams = {
@@ -330,7 +334,10 @@ export function ApiFunctionsScreen({
   };
 
   const handleCancelIntent = async (intentHash: string) => {
-    if (!zkp2pClient) return;
+    if (!zkp2pClient?.walletClient?.account) {
+      console.warn('Wallet connection required to cancel an intent.');
+      return;
+    }
     setIsCancelLoading(true);
     try {
       const params: CancelIntentParams = {
@@ -354,6 +361,8 @@ export function ApiFunctionsScreen({
 
   console.log('Intent:', intent);
 
+  const connectedAddress = zkp2pClient?.walletClient?.account?.address;
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.headerContainer}>
@@ -366,8 +375,8 @@ export function ApiFunctionsScreen({
       <View style={styles.balanceContainer}>
         <Text style={styles.balanceLabel}>Wallet Address:</Text>
         <Text style={styles.addressText}>
-          {zkp2pClient?.walletClient?.account?.address
-            ? `${zkp2pClient.walletClient.account.address.slice(0, 6)}...${zkp2pClient.walletClient.account.address.slice(-4)}`
+          {connectedAddress
+            ? `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`
             : 'Not connected'}
         </Text>
         <Text style={styles.balanceLabel}>ETH Balance:</Text>

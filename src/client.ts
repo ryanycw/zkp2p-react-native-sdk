@@ -58,8 +58,8 @@ import { ESCROW_ABI } from './utils/contracts';
 import { logger } from './utils/logger';
 
 export class Zkp2pClient {
-  readonly walletClient: WalletClient;
-  readonly apiKey: string;
+  readonly walletClient: WalletClient | null;
+  readonly apiKey: string | null;
   readonly chainId: number;
   readonly environment: 'production' | 'staging';
   readonly baseApiUrl: string;
@@ -73,8 +73,8 @@ export class Zkp2pClient {
    * @param opts configuration options including wallet client and API key
    */
   constructor(opts: Zkp2pClientOptions) {
-    this.walletClient = opts.walletClient;
-    this.apiKey = opts.apiKey;
+    this.walletClient = opts.walletClient ?? null;
+    this.apiKey = opts.apiKey ?? null;
     this.chainId = opts.chainId;
     this.environment = opts.environment || 'production';
     this.baseApiUrl = opts.baseApiUrl || DEFAULT_BASE_API_URL;
@@ -153,12 +153,31 @@ export class Zkp2pClient {
     }) as PublicClient;
   }
 
+  private assertWalletClient(action: string): WalletClient {
+    if (!this.walletClient) {
+      throw new Error(
+        `walletClient is required to ${action}. Pass a viem WalletClient when constructing Zkp2pClient.`
+      );
+    }
+    return this.walletClient;
+  }
+
+  private assertApiKey(action: string): string {
+    if (!this.apiKey) {
+      throw new Error(
+        `apiKey is required to ${action}. Provide an API key when constructing Zkp2pClient.`
+      );
+    }
+    return this.apiKey;
+  }
+
   /**
    * Calls the escrow contract to fulfill a previously signalled intent.
    */
   async fulfillIntent(params: FulfillIntentParams): Promise<Hash> {
+    const walletClient = this.assertWalletClient('fulfill intents');
     return fulfillIntent(
-      this.walletClient,
+      walletClient,
       this.publicClient,
       this.addresses.escrow,
       params
@@ -171,13 +190,15 @@ export class Zkp2pClient {
   async signalIntent(
     params: SignalIntentParams
   ): Promise<SignalIntentResponse & { txHash?: Hash }> {
+    const walletClient = this.assertWalletClient('signal intents');
+    const apiKey = this.assertApiKey('signal intents');
     return signalIntent(
-      this.walletClient,
+      walletClient,
       this.publicClient,
       this.addresses.escrow,
       this.chainId,
       params,
-      this.apiKey,
+      apiKey,
       this.baseApiUrl
     );
   }
@@ -188,13 +209,15 @@ export class Zkp2pClient {
   async createDeposit(
     params: CreateDepositParams
   ): Promise<{ depositDetails: PostDepositDetailsRequest[]; hash: Hash }> {
+    const walletClient = this.assertWalletClient('create deposits');
+    const apiKey = this.assertApiKey('create deposits');
     return createDeposit(
-      this.walletClient,
+      walletClient,
       this.publicClient,
       this.addresses.escrow,
       this.chainId,
       params,
-      this.apiKey,
+      apiKey,
       this.baseApiUrl,
       this.addresses.gatingService,
       this.addresses.zkp2pWitnessSigner,
@@ -206,8 +229,9 @@ export class Zkp2pClient {
    * Withdraws a deposit from the escrow contract.
    */
   async withdrawDeposit(params: WithdrawDepositParams): Promise<Hash> {
+    const walletClient = this.assertWalletClient('withdraw deposits');
     return withdrawDeposit(
-      this.walletClient,
+      walletClient,
       this.publicClient,
       this.addresses.escrow,
       params
@@ -218,8 +242,9 @@ export class Zkp2pClient {
    * Cancels an intent.
    */
   async cancelIntent(params: CancelIntentParams): Promise<Hash> {
+    const walletClient = this.assertWalletClient('cancel intents');
     return cancelIntent(
-      this.walletClient,
+      walletClient,
       this.publicClient,
       this.addresses.escrow,
       params
@@ -230,8 +255,9 @@ export class Zkp2pClient {
    * Releases funds to the payer.
    */
   async releaseFundsToPayer(params: ReleaseFundsToPayerParams): Promise<Hash> {
+    const walletClient = this.assertWalletClient('release funds to payers');
     return releaseFundsToPayer(
-      this.walletClient,
+      walletClient,
       this.publicClient,
       this.addresses.escrow,
       params
@@ -248,7 +274,11 @@ export class Zkp2pClient {
     const quoteResponse = await apiGetQuote(params, this.baseApiUrl);
 
     // If we have quotes and an API key, enrich them with payee details
-    if (quoteResponse.responseObject?.quotes && this.apiKey) {
+    if (quoteResponse.responseObject?.quotes) {
+      const apiKey = this.apiKey;
+      if (!apiKey) {
+        return quoteResponse;
+      }
       try {
         // Create promises for all payee details fetches
         const payeeDetailsPromises = quoteResponse.responseObject.quotes.map(
@@ -260,7 +290,7 @@ export class Zkp2pClient {
               if (hashedOnchainId && platform) {
                 const payeeDetailsResponse = await apiGetPayeeDetails(
                   { hashedOnchainId, platform },
-                  this.apiKey,
+                  apiKey,
                   this.baseApiUrl
                 );
 
@@ -297,28 +327,32 @@ export class Zkp2pClient {
   async getPayeeDetails(
     params: GetPayeeDetailsRequest
   ): Promise<GetPayeeDetailsResponse> {
-    return apiGetPayeeDetails(params, this.apiKey, this.baseApiUrl);
+    const apiKey = this.assertApiKey('fetch payee details');
+    return apiGetPayeeDetails(params, apiKey, this.baseApiUrl);
   }
 
   /** Validate payee details via the API. */
   async validatePayeeDetails(
     params: ValidatePayeeDetailsRequest
   ): Promise<ValidatePayeeDetailsResponse> {
-    return apiValidatePayeeDetails(params, this.apiKey, this.baseApiUrl);
+    const apiKey = this.assertApiKey('validate payee details');
+    return apiValidatePayeeDetails(params, apiKey, this.baseApiUrl);
   }
 
   /** Fetch historical deposits for a given owner address via the API. */
   async getAccountDepositsHistory(
     params: GetOwnerDepositsRequest
   ): Promise<GetOwnerDepositsResponse> {
-    return apiGetOwnerDeposits(params, this.apiKey, this.baseApiUrl);
+    const apiKey = this.assertApiKey('fetch account deposit history');
+    return apiGetOwnerDeposits(params, apiKey, this.baseApiUrl);
   }
 
   /** Fetch historical intents for a given taker address with optional status filter. */
   async getAccountIntentsHistory(
     params: GetIntentsByTakerRequest
   ): Promise<GetIntentsByTakerResponse> {
-    return apiGetIntentsByTaker(params, this.apiKey, this.baseApiUrl);
+    const apiKey = this.assertApiKey('fetch account intent history');
+    return apiGetIntentsByTaker(params, apiKey, this.baseApiUrl);
   }
 
   /**
@@ -328,7 +362,8 @@ export class Zkp2pClient {
   async getDepositsOrderStats(
     params: GetDepositsOrderStatsRequest
   ): Promise<GetDepositsOrderStatsResponse> {
-    return apiGetDepositsOrderStats(params, this.apiKey, this.baseApiUrl);
+    const apiKey = this.assertApiKey('fetch deposit order stats');
+    return apiGetDepositsOrderStats(params, apiKey, this.baseApiUrl);
   }
 
   /**
@@ -360,7 +395,7 @@ export class Zkp2pClient {
             enrichVerifiers(
               view.verifiers,
               this.addresses,
-              this.apiKey,
+              this.apiKey ?? undefined,
               this.baseApiUrl
             )
           )
@@ -410,7 +445,7 @@ export class Zkp2pClient {
         await enrichVerifiers(
           parsed.deposit.verifiers,
           this.addresses,
-          this.apiKey,
+          this.apiKey ?? undefined,
           this.baseApiUrl
         );
         enrichIntentFromVerifiers(parsed, this.addresses);
@@ -424,6 +459,50 @@ export class Zkp2pClient {
       return parsed;
     } catch (error) {
       logger.error('[zkp2p] Error fetching account intent:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetches and parses a specific intent by intent hash.
+   */
+  async getIntent(intentHash: Hash): Promise<EscrowIntentView | null> {
+    if (!this.publicClient) {
+      throw new Error('Public client is not initialized');
+    }
+    try {
+      const rawIntentView = await this.publicClient.readContract({
+        address: this.addresses.escrow,
+        abi: ESCROW_ABI,
+        functionName: 'getIntent',
+        args: [intentHash],
+      });
+
+      if (
+        !rawIntentView ||
+        rawIntentView.intentHash ===
+          '0x0000000000000000000000000000000000000000000000000000000000000000'
+      ) {
+        return null;
+      }
+
+      const parsed = parseEscrowIntentView(rawIntentView);
+
+      try {
+        await enrichVerifiers(
+          parsed.deposit.verifiers,
+          this.addresses,
+          this.apiKey ?? undefined,
+          this.baseApiUrl
+        );
+        enrichIntentFromVerifiers(parsed, this.addresses);
+      } catch (e) {
+        logger.warn('[zkp2p] Error enriching intent with payee data:', e);
+      }
+
+      return parsed;
+    } catch (error) {
+      logger.error('[zkp2p] Error fetching intent:', error);
       throw error;
     }
   }

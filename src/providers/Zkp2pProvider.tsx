@@ -223,17 +223,16 @@ const Zkp2pProvider = ({
   }, [logLevel]);
 
   const zkp2pClient = useMemo(() => {
-    if (!apiKey || !walletClient) {
-      return null;
-    }
     const clientOptions: Zkp2pClientOptions = {
       prover,
       walletClient,
-      apiKey,
       chainId,
       environment,
       witnessUrl,
     };
+    if (apiKey) {
+      clientOptions.apiKey = apiKey;
+    }
     if (baseApiUrl) {
       clientOptions.baseApiUrl = baseApiUrl;
     }
