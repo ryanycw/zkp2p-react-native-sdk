@@ -14,8 +14,9 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/zkp2p/zkp2p-react-native-sdk.git", :tag => "#{s.version}" }
 
-  s.source_files = "ios/**/*.{h,m,mm}"
-  s.vendored_frameworks = "ios/libgnarkprover.xcframework"
+  s.public_header_files = 'include/**/*.h'
+  s.source_files = "ios/**/*.{h,m,mm}", 'include/**/*.h'
+  s.vendored_frameworks = "ios/libgnarkprover.xcframework", "ios/libtlsnprover.xcframework"
   
   # Use centralized gnark-circuits directory
   s.resources = "gnark-circuits/*"
@@ -33,7 +34,8 @@ Pod::Spec.new do |s|
       s.pod_target_xcconfig    = {
           "HEADER_SEARCH_PATHS" => "\"$(PODS_ROOT)/boost\"",
           "OTHER_CPLUSPLUSFLAGS" => "-DFOLLY_NO_CONFIG -DFOLLY_MOBILE=1 -DFOLLY_USE_LIBCPP=1",
-          "CLANG_CXX_LANGUAGE_STANDARD" => "c++17"
+          "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",
+          'OTHER_LDFLAGS' => '-undefined dynamic_lookup'
       }
       s.dependency "React-Codegen"
       s.dependency "RCT-Folly"
