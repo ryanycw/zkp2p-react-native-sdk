@@ -28,8 +28,8 @@ import type { WebViewErrorEvent } from 'react-native-webview/lib/WebViewTypes';
 import CookieManager from '@react-native-cookies/cookies';
 import { JSONPath } from 'jsonpath-plus';
 import type { WalletClient } from 'viem';
-import Svg, { Circle } from 'react-native-svg';
 import DeviceInfo from 'react-native-device-info';
+import Svg, { Circle } from 'react-native-svg';
 
 import {
   type WindowRPCIncomingMsg,
@@ -123,7 +123,30 @@ interface Zkp2pProviderProps {
 // ANIMATED SVG COMPONENT
 // ============================================================================
 
-const AnimatedSvg = Animated.createAnimatedComponent(Svg as any);
+const PROGRESS_RADIUS = 58;
+const PROGRESS_DIAMETER = 128;
+const PROGRESS_CENTER = PROGRESS_DIAMETER / 2;
+const PROGRESS_STROKE_WIDTH = 8;
+const PROGRESS_CIRCUMFERENCE = 2 * Math.PI * PROGRESS_RADIUS;
+const AUTO_PROGRESS_TARGET = 0.99;
+const AUTO_PROGRESS_TOTAL_DURATION = 10_000;
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle as any);
+
+const PROGRESS_MESSAGES = [
+  {
+    threshold: 0,
+    meta: 'Initializing secure session...',
+  },
+  {
+    threshold: 0.15,
+    meta: 'Authenticating...',
+  },
+  {
+    threshold: 0.7,
+    meta: 'Almost there...',
+  },
+] as const;
 
 const getCustomUserAgent = (providerCfg?: ProviderSettings): string => {
   if (!providerCfg?.mobile?.userAgent) {
@@ -261,8 +284,10 @@ const Zkp2pProvider = ({
   // Auth modal visibility for slide-in/out animation without Animated.View
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const pending = useRef<Record<string, PendingEntry>>({});
-  const spinAnimation = useRef(new Animated.Value(0)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
   const authRevealAnim = useRef(new Animated.Value(0)).current;
+  const proofSheetAnim = useRef(new Animated.Value(0)).current;
+  const wasSpinnerVisibleRef = useRef(false);
   const sessionIdRef = useRef(0);
   // Pending captured credentials and per-auth options/context
   const pendingCredentialsRef = useRef<Credentials | null>(null);
@@ -281,6 +306,43 @@ const Zkp2pProvider = ({
   );
   const consentCtxRef = useRef<{ platform: string; actionType: string } | null>(
     null
+  );
+  const [proofStage, setProofStage] = useState<
+    'idle' | 'running' | 'success' | 'failure'
+  >('idle');
+  const initialMessage = PROGRESS_MESSAGES[0];
+  const [progressMeta, setProgressMeta] = useState<string>(
+    initialMessage ? initialMessage.meta : 'Initializing secure session'
+  );
+  const progressValueRef = useRef<number>(0);
+  const autoProgressAnimationRef = useRef<Animated.CompositeAnimation | null>(
+    null
+  );
+  const progressMessageIndexRef = useRef(-1);
+
+  const updateProgressMessage = useCallback(
+    (value: number) => {
+      if (proofStage !== 'running') return;
+      const normalized = Math.max(0, Math.min(1, value));
+      let nextIndex = 0;
+      for (let i = PROGRESS_MESSAGES.length - 1; i >= 0; i--) {
+        const descriptor = PROGRESS_MESSAGES[i];
+        if (!descriptor) continue;
+        if (normalized >= descriptor.threshold - 0.001) {
+          nextIndex = i;
+          break;
+        }
+      }
+      if (nextIndex !== progressMessageIndexRef.current) {
+        const descriptor =
+          PROGRESS_MESSAGES[nextIndex] ??
+          PROGRESS_MESSAGES[PROGRESS_MESSAGES.length - 1];
+        if (!descriptor) return;
+        progressMessageIndexRef.current = nextIndex;
+        setProgressMeta(descriptor.meta);
+      }
+    },
+    [proofStage]
   );
 
   const _requestConsentInternal = useCallback(
@@ -328,6 +390,79 @@ const Zkp2pProvider = ({
       );
     },
     []
+  );
+
+  const setProgressStage = useCallback(
+    (stage: 'idle' | 'running' | 'success' | 'failure') => {
+      setProofStage(stage);
+      switch (stage) {
+        case 'idle':
+        case 'running': {
+          progressMessageIndexRef.current = -1;
+          const descriptor = PROGRESS_MESSAGES[0];
+          if (descriptor) {
+            setProgressMeta(descriptor.meta);
+          }
+          break;
+        }
+        case 'success':
+          progressMessageIndexRef.current = -1;
+          setProgressMeta('Payment Verified!');
+          break;
+        case 'failure':
+          progressMessageIndexRef.current = -1;
+          setProgressMeta('Verification failed');
+          break;
+        default:
+          break;
+      }
+    },
+    [setProofStage]
+  );
+
+  useEffect(() => {
+    const listenerId = progressAnim.addListener(({ value }) => {
+      progressValueRef.current = value;
+      updateProgressMessage(value);
+    });
+    return () => {
+      progressAnim.removeListener(listenerId);
+    };
+  }, [progressAnim, updateProgressMessage]);
+
+  const stopAutoProgress = useCallback(() => {
+    if (autoProgressAnimationRef.current) {
+      autoProgressAnimationRef.current.stop();
+      autoProgressAnimationRef.current = null;
+    }
+  }, []);
+
+  const animateToProgress = useCallback(
+    (value: number, duration?: number) => {
+      const clamped = Math.max(0, Math.min(1, value));
+      stopAutoProgress();
+      const current = progressValueRef.current;
+      if (Math.abs(current - clamped) < 0.001) {
+        progressAnim.setValue(clamped);
+        progressValueRef.current = clamped;
+        return;
+      }
+
+      const delta = Math.abs(clamped - current);
+      const resolvedDuration = duration ?? Math.max(350, 900 * delta + 200);
+
+      Animated.timing(progressAnim, {
+        toValue: clamped,
+        duration: resolvedDuration,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: false,
+      }).start(({ finished }) => {
+        if (finished) {
+          progressValueRef.current = clamped;
+        }
+      });
+    },
+    [progressAnim, stopAutoProgress]
   );
 
   const clearStoredCredentials = useCallback(async () => {
@@ -1288,6 +1423,11 @@ const Zkp2pProvider = ({
       logger.info('[zkp2p] Starting proof generation...');
       if (sid !== sessionIdRef.current) return [];
       dispatch({ type: 'PROOF_START' });
+      stopAutoProgress();
+      progressValueRef.current = 0;
+      progressAnim.setValue(0);
+      progressMessageIndexRef.current = -1;
+      setProgressStage('running');
       setProofData([]);
       setLastProofItemIndex(itemIndex);
       try {
@@ -1357,17 +1497,12 @@ const Zkp2pProvider = ({
               : 1,
         };
         await ensureRpcReady();
-        const res = await _rpcRequest('createClaim', rpc, (stepData) => {
-          logger.debug('[zkp2p] Proof generation step:', stepData);
-          if (stepData.step?.error) {
-            logger.error(
-              '[zkp2p] Proof generation step error:',
-              stepData.step.error
-            );
-          }
-        });
+        const res = await _rpcRequest('createClaim', rpc);
 
-        if (sid !== sessionIdRef.current) return [] as any;
+        if (sid !== sessionIdRef.current) {
+          setProgressStage('idle');
+          return [] as any;
+        }
         const proof = parseReclaimProxyProof(res.response ?? null);
         const proofDataItem: ProofData = {
           proofType: 'reclaim',
@@ -1463,16 +1598,19 @@ const Zkp2pProvider = ({
           }
 
           setProofData(allProofs);
+          setProgressStage('success');
           dispatch({ type: 'PROOF_SUCCESS' });
           return allProofs;
         } else {
           // Single proof case
           setProofData([proofDataItem]);
+          setProgressStage('success');
           dispatch({ type: 'PROOF_SUCCESS' });
           return [proofDataItem];
         }
       } catch (err) {
         if (sid !== sessionIdRef.current) throw err;
+        setProgressStage('failure');
         dispatch({ type: 'PROOF_FAILURE', error: err as Error });
         throw err;
       } finally {
@@ -1504,6 +1642,9 @@ const Zkp2pProvider = ({
       gnarkBridge,
       dispatch,
       ensureRpcReady,
+      setProgressStage,
+      stopAutoProgress,
+      progressAnim,
     ]
   );
 
@@ -1579,15 +1720,7 @@ const Zkp2pProvider = ({
             : 1,
       };
 
-      const res = await _rpcRequest('createClaim', rpc, (stepData) => {
-        logger.debug('[zkp2p] Proof generation step:', stepData);
-        if (stepData.step?.error) {
-          logger.error(
-            '[zkp2p] Proof generation step error:',
-            stepData.step.error
-          );
-        }
-      });
+      const res = await _rpcRequest('createClaim', rpc);
 
       return res;
     },
@@ -1835,9 +1968,10 @@ const Zkp2pProvider = ({
         }
         rpcReadyRef.current = false;
         setRpcVisible(false);
+        setProgressStage('idle');
       }
     },
-    [abortAllPending, gnarkBridge]
+    [abortAllPending, gnarkBridge, setProgressStage]
   );
 
   // ==========================================================================
@@ -1878,6 +2012,7 @@ const Zkp2pProvider = ({
       rpcReadyRef.current = false;
       setRpcVisible(false);
       proofInFlightRef.current = false;
+      setProgressStage('idle');
 
       // Reset flow reducer to initial
       dispatch({ type: 'RESET' });
@@ -1892,6 +2027,7 @@ const Zkp2pProvider = ({
     setProofData,
     dispatch,
     closeAuthWebView,
+    setProgressStage,
   ]);
 
   // ==========================================================================
@@ -1903,6 +2039,19 @@ const Zkp2pProvider = ({
     const windowH = Dimensions.get('window').height;
     return Math.floor(windowH * 0.9);
   }, [isWebViewMinimized]);
+
+  const proofSheetTheme = useMemo(() => {
+    return {
+      sheetColor: '#171717',
+      buttonColor: '#ffbd4a',
+      buttonTextColor: '#171717',
+    } as const;
+  }, []);
+
+  const spinnerVisible =
+    flowState === 'proofGenerating' ||
+    flowState === 'proofGeneratedSuccess' ||
+    flowState === 'proofGeneratedFailure';
 
   // ==========================================================================
   // EFFECTS
@@ -1937,31 +2086,92 @@ const Zkp2pProvider = ({
     _handleAutoGenerateProof,
   ]);
 
-  // Proof generation animation effect
   useEffect(() => {
-    if (flowState === 'proofGenerating') {
-      spinAnimation.setValue(0);
-      const animation = Animated.loop(
-        Animated.timing(spinAnimation, {
-          toValue: 1,
-          duration: 1000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        })
-      );
-      animation.start();
-      return () => animation.stop();
-    } else if (flowState === 'proofGeneratedSuccess') {
-      spinAnimation.setValue(0);
+    if (!spinnerVisible) {
+      progressAnim.setValue(0);
+      progressValueRef.current = 0;
+      setProgressStage('idle');
+      stopAutoProgress();
+      return;
+    }
+
+    if (proofStage === 'success' || proofStage === 'failure') {
+      stopAutoProgress();
+      animateToProgress(1, 700);
+      return;
+    }
+
+    if (proofStage === 'idle') {
+      setProgressStage('running');
+    }
+
+    stopAutoProgress();
+    const startValue = progressValueRef.current;
+    const remaining = Math.max(0, AUTO_PROGRESS_TARGET - startValue);
+    if (remaining <= 0.001) {
+      return;
+    }
+
+    const duration = Math.max(
+      0,
+      (AUTO_PROGRESS_TOTAL_DURATION * remaining) / AUTO_PROGRESS_TARGET
+    );
+    if (duration === 0) {
+      return;
+    }
+
+    const animation = Animated.timing(progressAnim, {
+      toValue: AUTO_PROGRESS_TARGET,
+      duration,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    });
+    autoProgressAnimationRef.current = animation;
+    animation.start(({ finished }) => {
+      if (finished) {
+        progressValueRef.current = AUTO_PROGRESS_TARGET;
+      }
+      autoProgressAnimationRef.current = null;
+    });
+
+    return () => {
+      stopAutoProgress();
+    };
+  }, [
+    spinnerVisible,
+    proofStage,
+    progressAnim,
+    stopAutoProgress,
+    animateToProgress,
+    setProgressStage,
+  ]);
+
+  useEffect(() => {
+    if (flowState === 'proofGeneratedSuccess') {
       const timer = setTimeout(() => {
         dispatch({ type: 'AUTH_CLOSE' });
       }, 1000);
       return () => clearTimeout(timer);
-    } else {
-      spinAnimation.setValue(0);
-      return () => {};
     }
-  }, [flowState, spinAnimation]);
+    return undefined;
+  }, [flowState, dispatch]);
+
+  // Bottom sheet entrance animation for proof modal
+  useEffect(() => {
+    const wasVisible = wasSpinnerVisibleRef.current;
+    if (spinnerVisible && !wasVisible) {
+      proofSheetAnim.setValue(0);
+      Animated.timing(proofSheetAnim, {
+        toValue: 1,
+        duration: 240,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    } else if (!spinnerVisible && wasVisible) {
+      proofSheetAnim.setValue(0);
+    }
+    wasSpinnerVisibleRef.current = spinnerVisible;
+  }, [spinnerVisible, proofSheetAnim]);
 
   // Reveal animation for auth WebView container (used only when revealing from hidden state)
   useEffect(() => {
@@ -1983,6 +2193,37 @@ const Zkp2pProvider = ({
     },
     [abortAllPending]
   );
+
+  const progressStrokeOffset = useMemo(
+    () =>
+      progressAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [PROGRESS_CIRCUMFERENCE, 0],
+      }),
+    [progressAnim]
+  );
+
+  const progressColor = useMemo(() => {
+    switch (proofStage) {
+      case 'failure':
+        return '#e74c3c';
+      case 'success':
+        return '#27ae60';
+      default:
+        return proofSheetTheme.buttonColor;
+    }
+  }, [proofStage, proofSheetTheme.buttonColor]);
+
+  const percentLabel = useMemo(() => {
+    if (proofStage === 'idle') return '';
+    if (proofStage === 'failure') {
+      return proofError?.message ?? progressMeta;
+    }
+    if (proofStage === 'success') {
+      return progressMeta;
+    }
+    return progressMeta;
+  }, [proofStage, progressMeta, proofError]);
 
   // ==========================================================================
   // RENDER
@@ -2115,9 +2356,31 @@ const Zkp2pProvider = ({
       {(flowState === 'proofGenerating' ||
         flowState === 'proofGeneratedSuccess' ||
         flowState === 'proofGeneratedFailure') && (
-        <Modal transparent animationType="fade" visible={true}>
-          <View style={styles.proofSpinnerBackdrop}>
-            <View style={styles.proofSpinnerCard}>
+        <Modal
+          transparent
+          animationType="fade"
+          visible={true}
+          statusBarTranslucent
+          presentationStyle="overFullScreen"
+        >
+          <View style={styles.proofSpinnerModalRoot}>
+            <View style={styles.proofSpinnerBackdrop} />
+            <Animated.View
+              style={[
+                styles.proofSpinnerCard,
+                { backgroundColor: proofSheetTheme.sheetColor },
+                {
+                  transform: [
+                    {
+                      translateY: proofSheetAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [64, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
               {/* Exit button in top right */}
               <TouchableOpacity
                 style={styles.proofSpinnerExitButton}
@@ -2168,111 +2431,82 @@ const Zkp2pProvider = ({
                   ? 'Successfully Verified!'
                   : flowState === 'proofGeneratedFailure'
                     ? 'Verification Failed'
-                    : 'Verifying...'}
+                    : 'Verification In Progress'}
               </Text>
 
-              <View style={styles.proofSpinnerWrapper}>
-                <AnimatedSvg
-                  width={128}
-                  height={128}
-                  style={[
-                    styles.proofSpinnerRing,
-                    {
-                      transform: [
-                        {
-                          rotate: spinAnimation.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: ['0deg', '360deg'],
-                          }),
-                        },
-                      ],
-                    },
-                  ]}
-                  viewBox="0 0 128 128"
-                >
-                  <Circle
-                    cx="64"
-                    cy="64"
-                    r="58"
-                    stroke={
-                      flowState === 'proofGeneratedSuccess'
-                        ? '#27ae60'
-                        : flowState === 'proofGeneratedFailure'
-                          ? '#e74c3c'
-                          : '#555'
-                    }
-                    strokeWidth="6"
-                    fill="none"
-                    opacity={flowState !== 'proofGenerating' ? 0.5 : 1}
-                  />
-                  {/* Animated arc (colored) */}
-                  {flowState === 'proofGenerating' && (
+              <View style={styles.proofProgressSection}>
+                <View style={styles.proofSpinnerWrapper}>
+                  <Svg
+                    width={PROGRESS_DIAMETER}
+                    height={PROGRESS_DIAMETER}
+                    viewBox={`0 0 ${PROGRESS_DIAMETER} ${PROGRESS_DIAMETER}`}
+                  >
                     <Circle
-                      cx="64"
-                      cy="64"
-                      r="58"
-                      stroke="#ffbd4a"
-                      strokeWidth="6"
+                      cx={PROGRESS_CENTER}
+                      cy={PROGRESS_CENTER}
+                      r={PROGRESS_RADIUS}
+                      stroke="rgba(255,255,255,0.15)"
+                      strokeWidth={PROGRESS_STROKE_WIDTH}
                       fill="none"
-                      strokeDasharray="91.1 273.3" // ~25% of circumference
-                      strokeLinecap="round"
-                      transform="rotate(-90 64 64)" // Start from top
                     />
-                  )}
-                </AnimatedSvg>
-
-                {/* Logo in center (always) */}
-                <Image
-                  source={require('../assets/logo192.png')}
-                  style={styles.proofSpinnerLogoImage}
-                />
+                    <AnimatedCircle
+                      cx={PROGRESS_CENTER}
+                      cy={PROGRESS_CENTER}
+                      r={PROGRESS_RADIUS}
+                      stroke={progressColor}
+                      strokeWidth={PROGRESS_STROKE_WIDTH}
+                      strokeLinecap="round"
+                      fill="none"
+                      strokeDasharray={`${PROGRESS_CIRCUMFERENCE} ${PROGRESS_CIRCUMFERENCE}`}
+                      strokeDashoffset={progressStrokeOffset}
+                      transform={`rotate(-90 ${PROGRESS_CENTER} ${PROGRESS_CENTER})`}
+                    />
+                  </Svg>
+                  <Image
+                    source={require('../assets/logo192.png')}
+                    style={styles.proofSpinnerLogoImage}
+                  />
+                </View>
+                {percentLabel ? (
+                  <Text style={styles.proofSpinnerMeta}>{percentLabel}</Text>
+                ) : null}
               </View>
 
-              {flowState === 'proofGeneratedFailure' ? (
-                <>
-                  <Text style={styles.proofSpinnerSubtitle}>
-                    {proofError?.message ||
-                      'An error occurred while verifying payment'}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.retryButton}
-                    onPress={async () => {
-                      if (!provider || !interceptedPayload) return;
-                      try {
-                        const intentHash =
-                          '0x0000000000000000000000000000000000000000000000000000000000000001';
-                        await generateProof(
-                          provider,
-                          interceptedPayload,
-                          intentHash,
-                          lastProofItemIndex
-                        );
-                      } catch (err) {
-                        logger.error('[zkp2p] Retry failed:', err);
-                      }
-                    }}
+              {flowState === 'proofGeneratedFailure' && (
+                <TouchableOpacity
+                  style={[
+                    styles.retryButton,
+                    { backgroundColor: proofSheetTheme.buttonColor },
+                  ]}
+                  onPress={async () => {
+                    if (!provider || !interceptedPayload) return;
+                    try {
+                      const intentHash =
+                        '0x0000000000000000000000000000000000000000000000000000000000000001';
+                      await generateProof(
+                        provider,
+                        interceptedPayload,
+                        intentHash,
+                        lastProofItemIndex
+                      );
+                    } catch (err) {
+                      logger.error('[zkp2p] Retry failed:', err);
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.retryButtonText,
+                      { color: proofSheetTheme.buttonTextColor },
+                    ]}
                   >
-                    <Text style={styles.retryButtonText}>Retry</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.closeButton}
-                    onPress={() => dispatch({ type: 'PROOF_DISMISS' })}
-                  >
-                    <Text style={styles.closeButtonText}>Close</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.proofSpinnerSubtitle}>
-                    {flowState === 'proofGeneratedSuccess'
-                      ? 'Payment Verified!'
-                      : 'Verifying Payment'}
+                    Retry
                   </Text>
-                </>
+                </TouchableOpacity>
               )}
 
               <Text style={styles.proofSpinnerPoweredBy}>Secured by ZKP2P</Text>
-            </View>
+            </Animated.View>
           </View>
         </Modal>
       )}
@@ -2372,26 +2606,31 @@ const styles = StyleSheet.create({
   },
 
   // Proof Generation Spinner styles
-  proofSpinnerBackdrop: {
+  proofSpinnerModalRoot: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: '100%',
+    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+  },
+  proofSpinnerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.65)',
   },
   proofSpinnerCard: {
     backgroundColor: '#171717',
-    borderRadius: 12,
-    paddingVertical: 28,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 32,
+    paddingBottom: 36,
     paddingHorizontal: 32,
-    width: '90%',
-    maxWidth: 400,
-    minHeight: 380,
+    width: '100%',
+    minHeight: 360,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.7,
-    shadowRadius: 24,
-    elevation: 10,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 18,
   },
   proofSpinnerTitle: {
     fontSize: 20,
@@ -2400,34 +2639,46 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 0,
   },
-  proofSpinnerWrapper: {
-    width: 128,
-    height: 128,
+  proofProgressSection: {
+    width: '100%',
     marginTop: 32,
-    marginBottom: 32,
-    justifyContent: 'center',
+    marginBottom: 28,
     alignItems: 'center',
   },
-  proofSpinnerRing: {
-    position: 'absolute',
+  proofSpinnerWrapper: {
+    width: PROGRESS_DIAMETER,
+    height: PROGRESS_DIAMETER,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
   },
   proofSpinnerSubtitle: {
     fontSize: 14,
     color: '#fff',
     textAlign: 'center',
-    marginTop: 12,
+    marginTop: 16,
     paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  proofSpinnerMeta: {
+    marginTop: 20,
+    fontSize: 12,
+    color: '#d0d5dd',
+    textAlign: 'center',
   },
   proofSpinnerPoweredBy: {
-    fontSize: 12,
-    color: '#777',
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
     marginTop: 'auto',
-    marginBottom: 12,
+    marginBottom: 28,
+    textAlign: 'center',
   },
   proofSpinnerLogoImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 8,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    position: 'absolute',
   },
 
   // Button styles
@@ -2436,21 +2687,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
-    marginTop: 20,
+    marginBottom: 16,
   },
   retryButtonText: {
     color: '#171717',
     fontSize: 16,
     fontWeight: '600',
-  },
-  closeButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    marginTop: 10,
-  },
-  closeButtonText: {
-    color: '#aaa',
-    fontSize: 14,
   },
 
   // Proof spinner exit button styles
