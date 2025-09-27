@@ -127,6 +127,8 @@ const PROGRESS_RADIUS = 58;
 const PROGRESS_DIAMETER = 128;
 const PROGRESS_CENTER = PROGRESS_DIAMETER / 2;
 const PROGRESS_STROKE_WIDTH = 8;
+const PROGRESS_LOGO_SIZE = 68;
+const PROGRESS_LOGO_OFFSET = (PROGRESS_DIAMETER - PROGRESS_LOGO_SIZE) / 2;
 const PROGRESS_CIRCUMFERENCE = 2 * Math.PI * PROGRESS_RADIUS;
 const AUTO_PROGRESS_TARGET = 0.99;
 const AUTO_PROGRESS_TOTAL_DURATION = 10_000;
@@ -2465,6 +2467,7 @@ const Zkp2pProvider = ({
                   <Image
                     source={require('../assets/logo192.png')}
                     style={styles.proofSpinnerLogoImage}
+                    resizeMode="contain"
                   />
                 </View>
                 {percentLabel ? (
@@ -2675,10 +2678,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   proofSpinnerLogoImage: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: PROGRESS_LOGO_SIZE,
+    height: PROGRESS_LOGO_SIZE,
     position: 'absolute',
+    top: PROGRESS_LOGO_OFFSET,
+    left: PROGRESS_LOGO_OFFSET,
   },
 
   // Button styles
