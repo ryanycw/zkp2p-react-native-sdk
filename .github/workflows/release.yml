@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      increment:
+        description: 'Semver bump to apply when publishing'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prerelease
+      prerelease:
+        description: 'Prerelease identifier (only used when increment=prerelease)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Run release-it in dry-run mode'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_ENV: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Ensure running on main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Releases must be triggered from the main branch" >&2
+          exit 1
+
+      - name: Configure Git authentication
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'yarn'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Run quality checks
+        run: |
+          yarn lint
+          yarn typecheck
+          yarn test --runInBand
+          yarn prepare
+
+      - name: Build release-it arguments
+        id: release_args
+        env:
+          INCREMENT: ${{ github.event.inputs.increment }}
+          PRERELEASE: ${{ github.event.inputs.prerelease || '' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          args="--ci --npm.skipChecks --increment $INCREMENT"
+          if [ "$INCREMENT" = "prerelease" ] && [ -n "$PRERELEASE" ]; then
+            args+=" --preRelease $PRERELEASE"
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=" --dry-run"
+          fi
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to npm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          yarn release ${{ steps.release_args.outputs.args }}
