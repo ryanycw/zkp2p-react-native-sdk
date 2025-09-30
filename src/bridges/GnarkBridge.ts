@@ -125,6 +125,22 @@ export class GnarkBridge {
   }
 
   /**
+   * Configure bounded on-device native concurrency for gnark
+   */
+  async setConcurrencyLimit(limit: number): Promise<void> {
+    const k = Math.max(1, Math.floor(limit || 1));
+    const native: any = this.nativeModule as any;
+    if (typeof native.setConcurrencyLimit === 'function') {
+      try {
+        await native.setConcurrencyLimit(k);
+        logger.info('[GnarkBridge] Set native concurrency limit to', k);
+      } catch (err) {
+        logger.warn('[GnarkBridge] Failed to set concurrency limit:', err);
+      }
+    }
+  }
+
+  /**
    * Cancel an active proof generation
    * @param requestId The request ID of the proof to cancel
    * @returns Promise resolving when cancellation is complete

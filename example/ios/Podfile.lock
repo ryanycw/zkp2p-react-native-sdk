@@ -1785,7 +1785,7 @@ PODS:
     - Yoga
   - SocketRocket (0.7.1)
   - Yoga (0.0.0)
-  - Zkp2pReactNativeSdk (0.0.33):
+  - Zkp2pReactNativeSdk (0.0.34):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -2138,7 +2138,7 @@ SPEC CHECKSUMS:
   RNSVG: 8a1054afe490b5d63b9792d7ae3c1fde8c05cdd0
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
   Yoga: c758bfb934100bb4bf9cbaccb52557cee35e8bdf
-  Zkp2pReactNativeSdk: 24e1f83e55d998029b8e926fd7cba43cf05a38d0
+  Zkp2pReactNativeSdk: 66e1cb091b35efdb89b830f5ef460dcbf1b7a620
 
 PODFILE CHECKSUM: d7706bbfdad8bae97f268d1a6a3865075cdabe27
 

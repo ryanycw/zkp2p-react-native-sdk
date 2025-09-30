@@ -5,6 +5,8 @@ import android.util.Base64
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 import org.json.JSONArray
 import java.io.File
@@ -19,6 +21,8 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
     private var hasListeners = false
     private val activeProofJobs = mutableMapOf<String, Job>()
     private val cancelledTasks = mutableSetOf<String>()
+    @Volatile private var concurrencyLimit: Int = 1
+    @Volatile private var semaphore: Semaphore = Semaphore(1)
     
     data class AlgorithmConfig(
         val name: String,
@@ -69,7 +73,9 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
     }
 
     private fun ensureAlgorithmInitialized(name: String): Boolean {
-        if (initializedAlgorithms.contains(name)) return true
+        synchronized(this) {
+            if (initializedAlgorithms.contains(name)) return true
+        }
         val cfg = getConfigByName(name) ?: run {
             Log.e(NAME, "[Zkp2pGnarkModule] Unknown algorithm: $name")
             return false
@@ -87,7 +93,7 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
             } else {
                 val result = nativeInitAlgorithm(cfg.id, pkData, r1csData)
                 if (result == 1) {
-                    initializedAlgorithms.add(cfg.name)
+                    synchronized(this) { initializedAlgorithms.add(cfg.name) }
                     Log.d(NAME, "[Zkp2pGnarkModule] Initialized algorithm: ${cfg.name}")
                     true
                 } else {
@@ -137,7 +143,7 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
             return
         }
         
-        val job = coroutineScope.launch {
+        val job = coroutineScope.launch(Dispatchers.IO) {
             try {
                 when (functionName) {
                     "groth16Prove" -> {
@@ -148,16 +154,29 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
                         }
                         
                         // Check cancellation before starting
-                        if (cancelledTasks.contains(requestId)) {
-                            cancelledTasks.remove(requestId)
+                        var cancelled = false
+                        synchronized(this@Zkp2pGnarkModule) {
+                            cancelled = cancelledTasks.contains(requestId)
+                            if (cancelled) cancelledTasks.remove(requestId)
+                        }
+                        if (cancelled) {
+                            Log.d(NAME, "[Zkp2pGnarkModule] Cancellation detected before acquiring permit (queued) for request: $requestId")
                             throw CancellationException("Proof generation was cancelled")
                         }
                         
-                        val result = groth16Prove(args, requestId)
+                        // Bounded on-device concurrency (cancellable)
+                        val result = semaphore.withPermit {
+                            groth16Prove(args, requestId)
+                        }
                         
                         // Check cancellation after proof generation
-                        if (cancelledTasks.contains(requestId)) {
-                            cancelledTasks.remove(requestId)
+                        var cancelledAfter = false
+                        synchronized(this@Zkp2pGnarkModule) {
+                            cancelledAfter = cancelledTasks.contains(requestId)
+                            if (cancelledAfter) cancelledTasks.remove(requestId)
+                        }
+                        if (cancelledAfter) {
+                            Log.d(NAME, "[Zkp2pGnarkModule] Cancellation detected after execution (in-flight) for request: $requestId")
                             throw CancellationException("Proof generation was cancelled")
                         }
                         
@@ -175,16 +194,16 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
                 sendResponse(requestId, null, e)
                 promise.reject("EXECUTION_ERROR", e.message, e)
             } finally {
-                activeProofJobs.remove(requestId)
+                synchronized(this@Zkp2pGnarkModule) { activeProofJobs.remove(requestId) }
             }
         }
-        
-        activeProofJobs[requestId] = job
+        synchronized(this) { activeProofJobs[requestId] = job }
     }
 
     private fun groth16Prove(args: ReadableArray, requestId: String): WritableMap {
         // Periodically check for cancellation
-        if (cancelledTasks.contains(requestId)) {
+        val cancelledNow = synchronized(this) { cancelledTasks.contains(requestId) }
+        if (cancelledNow) {
             throw CancellationException("Proof generation was cancelled")
         }
         
@@ -206,7 +225,7 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
         val witnessJson = String(witnessBytes, Charsets.UTF_8)
         
         // If nothing initialized yet, try to infer and initialize from witness
-        if (initializedAlgorithms.isEmpty()) {
+        if (synchronized(this) { initializedAlgorithms.isEmpty() }) {
             try {
                 val argString = args.getString(0)
                 val base64Value = try {
@@ -227,7 +246,7 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
             val witnessObj = JSONObject(witnessJson)
             val cipher = witnessObj.optString("cipher", "unknown")
             
-            if (!initializedAlgorithms.contains(cipher)) {
+        if (!synchronized(this) { initializedAlgorithms.contains(cipher) }) {
                 Log.w(NAME, "[Zkp2pGnarkModule] WARNING: Cipher '$cipher' not found in initialized algorithms: $initializedAlgorithms")
             }
         } catch (e: Exception) {
@@ -235,7 +254,7 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
         }
         
         // Check cancellation before calling native prove
-        if (cancelledTasks.contains(requestId)) {
+        if (synchronized(this) { cancelledTasks.contains(requestId) }) {
             throw CancellationException("Proof generation was cancelled")
         }
         
@@ -272,20 +291,19 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
     }
 
     private fun sendResponse(requestId: String, response: WritableMap?, error: Exception?) {
-        if (hasListeners) {
-            val body = Arguments.createMap().apply {
-                putString("id", requestId)
-                putString("type", if (error != null) "error" else "response")
-
-                if (error != null) {
-                    putMap("error", Arguments.createMap().apply {
-                        putString("message", error.message ?: "Unknown error")
-                    })
-                } else if (response != null) {
-                    putMap("response", response)
-                }
+        if (!hasListeners) return
+        val body = Arguments.createMap().apply {
+            putString("id", requestId)
+            putString("type", if (error != null) "error" else "response")
+            if (error != null) {
+                putMap("error", Arguments.createMap().apply {
+                    putString("message", error.message ?: "Unknown error")
+                })
+            } else if (response != null) {
+                putMap("response", response)
             }
-
+        }
+        reactApplicationContext.runOnUiQueueThread {
             reactApplicationContext
                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                 .emit("GnarkRPCResponse", body)
@@ -326,12 +344,18 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
         Log.d(NAME, "[Zkp2pGnarkModule] Cancelling proof generation for request: $requestId")
         
         // Mark as cancelled
-        cancelledTasks.add(requestId)
+        synchronized(this) { cancelledTasks.add(requestId) }
         
         // Cancel the coroutine job if it exists
-        activeProofJobs[requestId]?.let { job ->
-            job.cancel()
-            activeProofJobs.remove(requestId)
+        synchronized(this) {
+            val job = activeProofJobs[requestId]
+            if (job != null) {
+                Log.d(NAME, "[Zkp2pGnarkModule] Found active job; cancelling immediately for request: $requestId")
+                job.cancel()
+                activeProofJobs.remove(requestId)
+            } else {
+                Log.d(NAME, "[Zkp2pGnarkModule] No active job; cancellation will apply when queued/in-flight for request: $requestId")
+            }
         }
         
         promise.resolve(Arguments.createMap().apply {
@@ -344,12 +368,14 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
         Log.d(NAME, "[Zkp2pGnarkModule] Cleaning up memory and cancelling all active tasks")
         
         // Cancel all active jobs
-        activeProofJobs.forEach { (requestId, job) ->
-            cancelledTasks.add(requestId)
-            job.cancel()
+        synchronized(this) {
+            activeProofJobs.forEach { (requestId, job) ->
+                cancelledTasks.add(requestId)
+                job.cancel()
+            }
+            activeProofJobs.clear()
+            cancelledTasks.clear()
         }
-        activeProofJobs.clear()
-        cancelledTasks.clear()
         
         // Suggest garbage collection (note: this is just a hint to the system)
         System.gc()
@@ -359,6 +385,17 @@ class Zkp2pGnarkModule(reactContext: ReactApplicationContext) :
         })
     }
     
+    @ReactMethod
+    fun setConcurrencyLimit(limit: Int, promise: Promise) {
+        val k = if (limit < 1) 1 else limit
+        concurrencyLimit = k
+        semaphore = Semaphore(k)
+        promise.resolve(Arguments.createMap().apply {
+            putBoolean("success", true)
+            putInt("limit", k)
+        })
+    }
+
     override fun onCatalystInstanceDestroy() {
         super.onCatalystInstanceDestroy()
         Log.d(NAME, "[Zkp2pGnarkModule] Catalyst instance destroying, cleaning up resources")

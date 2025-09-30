@@ -175,8 +175,8 @@ const calculateGnarkDynamicConcurrency = async (): Promise<number> => {
     const availableMemory = totalMemory - usedMemory;
 
     // Calculate concurrency based on available memory
-    // Assume each proof needs ~750MB
-    const memoryPerProof = 750 * 1024 * 1024; // 750MB
+    // Assume each proof needs ~500MB (empirical)
+    const memoryPerProof = 500 * 1024 * 1024; // 500MB
     const suggestedConcurrency = Math.floor(
       (availableMemory * 0.5) / memoryPerProof
     ); // Use 50% of available
@@ -206,7 +206,7 @@ const calculateGnarkDynamicConcurrency = async (): Promise<number> => {
     try {
       const isEmulator = await DeviceInfo.isEmulator();
       if (isEmulator) {
-        return 2;
+        return 6;
       }
     } catch {}
     return finalConcurrency;
@@ -1669,6 +1669,13 @@ const Zkp2pProvider = ({
           await gnarkBridge.waitForIdle(2000);
         } catch (e) {
           logger.warn('[zkp2p] waitForIdle before additional proof timed out');
+        }
+        // Configure native bounded concurrency based on device capacity
+        try {
+          const k = await calculateGnarkDynamicConcurrency();
+          await gnarkBridge.setConcurrencyLimit(k);
+        } catch (e) {
+          // best-effort
         }
       }
 

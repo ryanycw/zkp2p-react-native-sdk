@@ -37,6 +37,10 @@ static const NSUInteger ALGORITHM_COUNT = 3;
 @property (nonatomic, strong) NSMutableSet<NSString *> *initializedAlgorithms;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *algorithmIdMap;
 @property (nonatomic, strong) NSMutableSet<NSString *> *cancelledRequests;
+@property (nonatomic, strong) NSOperationQueue *gnarkQueue;
+@property (nonatomic, assign) NSInteger concurrencyLimit;
+@property (nonatomic, assign) BOOL queueInitialized;
+@property (nonatomic) dispatch_queue_t stateQueue;
 @end
 
 @implementation Zkp2pGnarkModule {
@@ -56,6 +60,12 @@ RCT_EXPORT_MODULE(Zkp2pGnarkModule)
         self.initializedAlgorithms = [NSMutableSet set];
         self.algorithmIdMap = [NSMutableDictionary dictionary];
         self.cancelledRequests = [NSMutableSet set];
+        self.concurrencyLimit = 1; // conservative default
+        self.gnarkQueue = [[NSOperationQueue alloc] init];
+        self.gnarkQueue.maxConcurrentOperationCount = (int)self.concurrencyLimit;
+        self.gnarkQueue.qualityOfService = NSQualityOfServiceUserInitiated;
+        self.queueInitialized = YES;
+        self.stateQueue = dispatch_queue_create("com.zkp2p.gnark.state", DISPATCH_QUEUE_SERIAL);
         
         // Initialize gnark binding
         enforce_binding();
@@ -72,11 +82,20 @@ RCT_EXPORT_MODULE(Zkp2pGnarkModule)
 - (BOOL)initializeAlgorithmIfNeeded:(NSString *)algorithmName
 {
     if (!algorithmName) { return NO; }
-    if ([self.initializedAlgorithms containsObject:algorithmName]) {
+
+    __block BOOL alreadyInitialized = NO;
+    dispatch_sync(self.stateQueue, ^{
+        alreadyInitialized = [self.initializedAlgorithms containsObject:algorithmName];
+    });
+    if (alreadyInitialized) {
         return YES;
     }
 
-    NSNumber *algIdNum = self.algorithmIdMap[algorithmName];
+    __block BOOL success = NO;
+    __block NSNumber *algIdNum = nil;
+    dispatch_sync(self.stateQueue, ^{
+        algIdNum = self.algorithmIdMap[algorithmName];
+    });
     if (!algIdNum) {
         NSLog(@"[Zkp2pGnarkModule] Unknown algorithm: %@", algorithmName);
         return NO;
@@ -85,49 +104,62 @@ RCT_EXPORT_MODULE(Zkp2pGnarkModule)
     NSUInteger algId = [algIdNum unsignedIntegerValue];
     AlgorithmConfig config = ALGORITHM_CONFIGS[algId];
 
-    NSBundle *mainBundle = [NSBundle mainBundle];
-    NSString *pkFilename = [NSString stringWithFormat:@"pk.%@", config.fileExt];
-    NSString *r1csFilename = [NSString stringWithFormat:@"r1cs.%@", config.fileExt];
+    // Perform initialization fully under stateQueue to serialize init
+    dispatch_sync(self.stateQueue, ^{
+        if ([self.initializedAlgorithms containsObject:algorithmName]) {
+            success = YES;
+            return;
+        }
 
-    NSString *pkPath = [mainBundle pathForResource:pkFilename ofType:nil];
-    NSString *r1csPath = [mainBundle pathForResource:r1csFilename ofType:nil];
+        NSBundle *mainBundle = [NSBundle mainBundle];
+        NSString *pkFilename = [NSString stringWithFormat:@"pk.%@", config.fileExt];
+        NSString *r1csFilename = [NSString stringWithFormat:@"r1cs.%@", config.fileExt];
 
-    if (!pkPath || !r1csPath) {
-        NSLog(@"[Zkp2pGnarkModule] ERROR: Circuit files not found for %@", algorithmName);
-        return NO;
-    }
+        NSString *pkPath = [mainBundle pathForResource:pkFilename ofType:nil];
+        NSString *r1csPath = [mainBundle pathForResource:r1csFilename ofType:nil];
 
-    NSError *error = nil;
-    NSData *pkData = [NSData dataWithContentsOfFile:pkPath options:0 error:&error];
-    if (error || !pkData) {
-        NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to load %@: %@", pkFilename, error);
-        return NO;
-    }
-    NSData *r1csData = [NSData dataWithContentsOfFile:r1csPath options:0 error:&error];
-    if (error || !r1csData) {
-        NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to load %@: %@", r1csFilename, error);
-        return NO;
-    }
+        if (!pkPath || !r1csPath) {
+            NSLog(@"[Zkp2pGnarkModule] ERROR: Circuit files not found for %@", algorithmName);
+            success = NO;
+            return;
+        }
 
-    GoSlice pkSlice;
-    pkSlice.data = (void *)[pkData bytes];
-    pkSlice.len = [pkData length];
-    pkSlice.cap = [pkData length];
+        NSError *error = nil;
+        NSData *pkData = [NSData dataWithContentsOfFile:pkPath options:0 error:&error];
+        if (error || !pkData) {
+            NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to load %@: %@", pkFilename, error);
+            success = NO;
+            return;
+        }
+        NSData *r1csData = [NSData dataWithContentsOfFile:r1csPath options:0 error:&error];
+        if (error || !r1csData) {
+            NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to load %@: %@", r1csFilename, error);
+            success = NO;
+            return;
+        }
 
-    GoSlice r1csSlice;
-    r1csSlice.data = (void *)[r1csData bytes];
-    r1csSlice.len = [r1csData length];
-    r1csSlice.cap = [r1csData length];
+        GoSlice pkSlice;
+        pkSlice.data = (void *)[pkData bytes];
+        pkSlice.len = [pkData length];
+        pkSlice.cap = [pkData length];
 
-    GoUint8 result = InitAlgorithm((GoUint8)algId, pkSlice, r1csSlice);
-    if (result == 1) {
-        [self.initializedAlgorithms addObject:algorithmName];
-        NSLog(@"[Zkp2pGnarkModule] Initialized algorithm: %@", algorithmName);
-        return YES;
-    } else {
-        NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to initialize %@ (id: %lu)", algorithmName, (unsigned long)algId);
-        return NO;
-    }
+        GoSlice r1csSlice;
+        r1csSlice.data = (void *)[r1csData bytes];
+        r1csSlice.len = [r1csData length];
+        r1csSlice.cap = [r1csData length];
+
+        GoUint8 result = InitAlgorithm((GoUint8)algId, pkSlice, r1csSlice);
+        if (result == 1) {
+            [self.initializedAlgorithms addObject:algorithmName];
+            NSLog(@"[Zkp2pGnarkModule] Initialized algorithm: %@", algorithmName);
+            success = YES;
+        } else {
+            NSLog(@"[Zkp2pGnarkModule] ERROR: Failed to initialize %@ (id: %lu)", algorithmName, (unsigned long)algId);
+            success = NO;
+        }
+    });
+
+    return success;
 }
 
 - (void)startObserving
@@ -147,20 +179,15 @@ RCT_EXPORT_MODULE(Zkp2pGnarkModule)
 
 - (void)sendResponse:(NSString *)requestId response:(NSDictionary *)response error:(NSDictionary *)error
 {
-    if (hasListeners) {
-        NSMutableDictionary *event = [NSMutableDictionary dictionary];
-        event[@"id"] = requestId;
-        event[@"type"] = error ? @"error" : @"response";
-        
-        if (response) {
-            event[@"response"] = response;
-        }
-        if (error) {
-            event[@"error"] = error;
-        }
-        
+    if (!hasListeners) { return; }
+    NSMutableDictionary *event = [NSMutableDictionary dictionary];
+    event[@"id"] = requestId ?: @"";
+    event[@"type"] = error ? @"error" : @"response";
+    if (response) { event[@"response"] = response; }
+    if (error) { event[@"error"] = error; }
+    dispatch_async(dispatch_get_main_queue(), ^{
         [self sendEventWithName:@"GnarkRPCResponse" body:event];
-    }
+    });
 }
 
 
@@ -172,14 +199,29 @@ RCT_EXPORT_METHOD(executeZkFunction:(NSString *)requestId
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    if (!self.queueInitialized) {
+        self.gnarkQueue = [[NSOperationQueue alloc] init];
+        self.gnarkQueue.maxConcurrentOperationCount = (int)MAX(1, self.concurrencyLimit);
+        self.gnarkQueue.qualityOfService = NSQualityOfServiceUserInitiated;
+        self.queueInitialized = YES;
+    }
+    __weak __typeof(self) weakSelf = self;
+    [self.gnarkQueue addOperationWithBlock:^{
+        @autoreleasepool {
+        Zkp2pGnarkModule *strongSelf = weakSelf;
+        if (!strongSelf) { return; }
         @try {
             // Check if cancelled
-            if ([self.cancelledRequests containsObject:requestId]) {
-                [self.cancelledRequests removeObject:requestId];
+            __block BOOL isCancelled = NO;
+            dispatch_sync(strongSelf.stateQueue, ^{
+                isCancelled = [strongSelf.cancelledRequests containsObject:requestId];
+                if (isCancelled) { [strongSelf.cancelledRequests removeObject:requestId]; }
+            });
+            if (isCancelled) {
+                NSLog(@"[Zkp2pGnarkModule] Cancellation detected pre-start (queued) for request: %@", requestId);
                 NSString *errorMsg = @"Proof generation was cancelled";
-                [self sendResponse:requestId response:nil error:@{@"message": errorMsg}];
-                reject(@"CANCELLED", errorMsg, nil);
+                [strongSelf sendResponse:requestId response:nil error:@{@"message": errorMsg}];
+                dispatch_async(dispatch_get_main_queue(), ^{ reject(@"CANCELLED", errorMsg, nil); });
                 return;
             }
             
@@ -215,14 +257,14 @@ RCT_EXPORT_METHOD(executeZkFunction:(NSString *)requestId
                 
                 // Ensure the requested algorithm is initialized lazily
                 if (algorithm && algorithm.length > 0) {
-                    [self initializeAlgorithmIfNeeded:algorithm];
+                    [strongSelf initializeAlgorithmIfNeeded:algorithm];
                 } else {
                     // Try to infer from witness JSON
                     @try {
                         NSDictionary *witnessDict = [NSJSONSerialization JSONObjectWithData:witnessData options:0 error:nil];
                         NSString *cipher = witnessDict[@"cipher"];
                         if (cipher) {
-                            [self initializeAlgorithmIfNeeded:cipher];
+                            [strongSelf initializeAlgorithmIfNeeded:cipher];
                         }
                     } @catch(...) {}
                 }
@@ -250,12 +292,17 @@ RCT_EXPORT_METHOD(executeZkFunction:(NSString *)requestId
                 memcpy(witnessCopy, [witnessData bytes], witnessLength);
                 
                 // Check if cancelled before proving
-                if ([self.cancelledRequests containsObject:requestId]) {
+                __block BOOL isCancelledAfterCopy = NO;
+                dispatch_sync(strongSelf.stateQueue, ^{
+                    isCancelledAfterCopy = [strongSelf.cancelledRequests containsObject:requestId];
+                    if (isCancelledAfterCopy) { [strongSelf.cancelledRequests removeObject:requestId]; }
+                });
+                if (isCancelledAfterCopy) {
+                    NSLog(@"[Zkp2pGnarkModule] Cancellation detected before Prove for request: %@", requestId);
                     free(witnessCopy);
-                    [self.cancelledRequests removeObject:requestId];
                     NSString *errorMsg = @"Proof generation was cancelled";
-                    [self sendResponse:requestId response:nil error:@{@"message": errorMsg}];
-                    reject(@"CANCELLED", errorMsg, nil);
+                    [strongSelf sendResponse:requestId response:nil error:@{@"message": errorMsg}];
+                    dispatch_async(dispatch_get_main_queue(), ^{ reject(@"CANCELLED", errorMsg, nil); });
                     return;
                 }
                 
@@ -272,14 +319,19 @@ RCT_EXPORT_METHOD(executeZkFunction:(NSString *)requestId
                 free(witnessCopy);
                 
                 // Check if cancelled after proving
-                if ([self.cancelledRequests containsObject:requestId]) {
-                    [self.cancelledRequests removeObject:requestId];
+                __block BOOL isCancelledAfterProve = NO;
+                dispatch_sync(strongSelf.stateQueue, ^{
+                    isCancelledAfterProve = [strongSelf.cancelledRequests containsObject:requestId];
+                    if (isCancelledAfterProve) { [strongSelf.cancelledRequests removeObject:requestId]; }
+                });
+                if (isCancelledAfterProve) {
+                    NSLog(@"[Zkp2pGnarkModule] Cancellation detected after Prove (in-flight) for request: %@", requestId);
                     if (result.r0) {
                         Free(result.r0);
                     }
                     NSString *errorMsg = @"Proof generation was cancelled";
-                    [self sendResponse:requestId response:nil error:@{@"message": errorMsg}];
-                    reject(@"CANCELLED", errorMsg, nil);
+                    [strongSelf sendResponse:requestId response:nil error:@{@"message": errorMsg}];
+                    dispatch_async(dispatch_get_main_queue(), ^{ reject(@"CANCELLED", errorMsg, nil); });
                     return;
                 }
                 
@@ -316,27 +368,28 @@ RCT_EXPORT_METHOD(executeZkFunction:(NSString *)requestId
                         @"publicSignals": publicSignalsValue
                     };
                     
-                    [self sendResponse:requestId response:response error:nil];
-                    resolve(nil);
+                    [strongSelf sendResponse:requestId response:response error:nil];
+                    dispatch_async(dispatch_get_main_queue(), ^{ resolve(nil); });
                 } else {
                     NSString *errorMsg = @"Prove function failed: returned null or empty result";
                     NSLog(@"[Zkp2pGnarkModule] ERROR: %@", errorMsg);
-                    [self sendResponse:requestId response:nil error:@{@"message": errorMsg}];
-                    reject(@"PROVE_ERROR", errorMsg, nil);
+                    [strongSelf sendResponse:requestId response:nil error:@{@"message": errorMsg}];
+                    dispatch_async(dispatch_get_main_queue(), ^{ reject(@"PROVE_ERROR", errorMsg, nil); });
                 }
                 
             } else {
                 NSString *errorMsg = [NSString stringWithFormat:@"Unknown function: %@", functionName];
-                [self sendResponse:requestId response:nil error:@{@"message": errorMsg}];
-                reject(@"UNKNOWN_FUNCTION", errorMsg, nil);
+                [strongSelf sendResponse:requestId response:nil error:@{@"message": errorMsg}];
+                dispatch_async(dispatch_get_main_queue(), ^{ reject(@"UNKNOWN_FUNCTION", errorMsg, nil); });
             }
         } @catch (NSException *exception) {
             NSString *errorMsg = [NSString stringWithFormat:@"Exception: %@", exception.reason];
             NSLog(@"[Zkp2pGnarkModule] EXCEPTION: %@", errorMsg);
-            [self sendResponse:requestId response:nil error:@{@"message": errorMsg}];
-            reject(@"EXCEPTION", errorMsg, nil);
+            [strongSelf sendResponse:requestId response:nil error:@{@"message": errorMsg}];
+            dispatch_async(dispatch_get_main_queue(), ^{ reject(@"EXCEPTION", errorMsg, nil); });
         }
-    });
+        }
+    }];
 }
 
 // Optional preload API to warm up a specific algorithm
@@ -344,15 +397,18 @@ RCT_EXPORT_METHOD(preloadAlgorithm:(NSString *)algorithm
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        BOOL ok = [self initializeAlgorithmIfNeeded:algorithm];
+    __weak __typeof(self) weakSelf = self;
+    [self.gnarkQueue addOperationWithBlock:^{
+        Zkp2pGnarkModule *strongSelf = weakSelf;
+        if (!strongSelf) { return; }
+        BOOL ok = [strongSelf initializeAlgorithmIfNeeded:algorithm];
         if (ok) {
-            resolve(@{ @"success": @YES });
+            dispatch_async(dispatch_get_main_queue(), ^{ resolve(@{ @"success": @YES }); });
         } else {
             NSString *msg = [NSString stringWithFormat:@"Failed to initialize algorithm: %@", algorithm ?: @"(nil)"];
-            reject(@"PRELOAD_FAILED", msg, nil);
+            dispatch_async(dispatch_get_main_queue(), ^{ reject(@"PRELOAD_FAILED", msg, nil); });
         }
-    });
+    }];
 }
 
 RCT_EXPORT_METHOD(cancelProofGeneration:(NSString *)requestId
@@ -362,7 +418,9 @@ RCT_EXPORT_METHOD(cancelProofGeneration:(NSString *)requestId
     NSLog(@"[Zkp2pGnarkModule] Cancelling proof generation for request: %@", requestId);
     
     // Mark as cancelled
-    [self.cancelledRequests addObject:requestId];
+    dispatch_async(self.stateQueue, ^{
+        [self.cancelledRequests addObject:requestId];
+    });
     
     resolve(@{@"success": @YES});
 }
@@ -373,7 +431,9 @@ RCT_EXPORT_METHOD(cleanupMemory:(RCTPromiseResolveBlock)resolve
     NSLog(@"[Zkp2pGnarkModule] Cleaning up memory");
     
     // Clear cancelled requests
-    [self.cancelledRequests removeAllObjects];
+    dispatch_async(self.stateQueue, ^{
+        [self.cancelledRequests removeAllObjects];
+    });
     
     // Force garbage collection (note: this is just a hint to the system)
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -382,6 +442,20 @@ RCT_EXPORT_METHOD(cleanupMemory:(RCTPromiseResolveBlock)resolve
     });
     
     resolve(@{@"success": @YES});
+}
+
+// Configure native concurrency limit for on-device proving
+RCT_EXPORT_METHOD(setConcurrencyLimit:(nonnull NSNumber *)limit
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+    NSInteger k = MAX(1, [limit integerValue]);
+    self.concurrencyLimit = k;
+    if (!self.gnarkQueue) {
+        self.gnarkQueue = [[NSOperationQueue alloc] init];
+    }
+    self.gnarkQueue.maxConcurrentOperationCount = (int)k;
+    resolve(@{ @"success": @YES, @"limit": @(k) });
 }
 
 @end

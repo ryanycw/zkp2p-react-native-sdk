@@ -15,4 +15,7 @@ export interface Spec {
 
   // Preload a single algorithm/circuit lazily
   preloadAlgorithm(algorithm: string): Promise<any>;
+
+  // Configure bounded on-device gnark concurrency
+  setConcurrencyLimit(concurrency: number): Promise<any>;
 }
