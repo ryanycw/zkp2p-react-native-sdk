@@ -337,11 +337,12 @@ describe('apiGetOwnerDeposits', () => {
     const result = await apiGetOwnerDeposits(
       { ownerAddress: '0xabc123' },
       mockApiKey,
-      mockBaseUrl
+      mockBaseUrl,
+      '0xescrow'
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `${mockBaseUrl}/deposits/maker/0xabc123`,
+      `${mockBaseUrl}/deposits/maker/0xabc123?escrowAddress=0xescrow`,
       expect.objectContaining({
         method: 'GET',
         headers: {
@@ -369,11 +370,12 @@ describe('apiGetOwnerDeposits', () => {
     await apiGetOwnerDeposits(
       { ownerAddress: '0xabc123', status: 'ACTIVE' },
       mockApiKey,
-      mockBaseUrl
+      mockBaseUrl,
+      '0xescrow'
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `${mockBaseUrl}/deposits/maker/0xabc123?status=ACTIVE`,
+      `${mockBaseUrl}/deposits/maker/0xabc123?escrowAddress=0xescrow&status=ACTIVE`,
       expect.any(Object)
     );
   });
@@ -386,7 +388,12 @@ describe('apiGetOwnerDeposits', () => {
     });
 
     await expect(
-      apiGetOwnerDeposits({ ownerAddress: '0xabc123' }, mockApiKey, mockBaseUrl)
+      apiGetOwnerDeposits(
+        { ownerAddress: '0xabc123' },
+        mockApiKey,
+        mockBaseUrl,
+        '0xescrow'
+      )
     ).rejects.toThrow();
   });
 });
@@ -443,11 +450,12 @@ describe('apiGetOwnerIntents', () => {
     const result = await apiGetOwnerIntents(
       { ownerAddress: '0xabc123' },
       mockApiKey,
-      mockBaseUrl
+      mockBaseUrl,
+      '0xescrow'
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `${mockBaseUrl}/orders/maker/0xabc123`,
+      `${mockBaseUrl}/orders/maker/0xabc123?escrowAddress=0xescrow`,
       expect.objectContaining({
         method: 'GET',
         headers: {
@@ -477,7 +485,8 @@ describe('apiGetOwnerIntents', () => {
     const result = await apiGetOwnerIntents(
       { ownerAddress: '0xabc123' },
       mockApiKey,
-      mockBaseUrl
+      mockBaseUrl,
+      '0xescrow'
     );
 
     expect(result.responseObject).toEqual([]);
@@ -491,7 +500,12 @@ describe('apiGetOwnerIntents', () => {
     });
 
     await expect(
-      apiGetOwnerIntents({ ownerAddress: '0xabc123' }, mockApiKey, mockBaseUrl)
+      apiGetOwnerIntents(
+        { ownerAddress: '0xabc123' },
+        mockApiKey,
+        mockBaseUrl,
+        '0xescrow'
+      )
     ).rejects.toThrow();
   });
 });
@@ -571,7 +585,8 @@ describe('Date transformation', () => {
     const result = await apiGetOwnerDeposits(
       { ownerAddress: '0x123' },
       'test-api-key',
-      'https://api.test.com'
+      'https://api.test.com',
+      '0xescrow'
     );
 
     // Check main object dates
@@ -646,11 +661,12 @@ describe('apiGetIntentsByDeposit', () => {
     const result = await apiGetIntentsByDeposit(
       { depositId: '456' },
       mockApiKey,
-      mockBaseUrl
+      mockBaseUrl,
+      '0xescrow'
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `${mockBaseUrl}/orders/deposit/456`,
+      `${mockBaseUrl}/orders/deposit/456?escrowAddress=0xescrow`,
       expect.objectContaining({
         method: 'GET',
         headers: {
@@ -678,11 +694,12 @@ describe('apiGetIntentsByDeposit', () => {
     await apiGetIntentsByDeposit(
       { depositId: '456', status: ['SIGNALED', 'FULFILLED'] },
       mockApiKey,
-      mockBaseUrl
+      mockBaseUrl,
+      '0xescrow'
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `${mockBaseUrl}/orders/deposit/456?status=SIGNALED,FULFILLED`,
+      `${mockBaseUrl}/orders/deposit/456?escrowAddress=0xescrow&status=SIGNALED%2CFULFILLED`,
       expect.any(Object)
     );
   });
@@ -691,7 +708,12 @@ describe('apiGetIntentsByDeposit', () => {
     (global.fetch as jest.Mock).mockRejectedValue(new Error('Network error'));
 
     await expect(
-      apiGetIntentsByDeposit({ depositId: '456' }, mockApiKey, mockBaseUrl)
+      apiGetIntentsByDeposit(
+        { depositId: '456' },
+        mockApiKey,
+        mockBaseUrl,
+        '0xescrow'
+      )
     ).rejects.toThrow('Failed to connect to API server');
   });
 });
@@ -912,11 +934,12 @@ describe('apiGetDepositById', () => {
     const result = await apiGetDepositById(
       { depositId: '123' },
       mockApiKey,
-      mockBaseUrl
+      mockBaseUrl,
+      '0xescrow'
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `${mockBaseUrl}/deposits/123`,
+      `${mockBaseUrl}/deposits/123?escrowAddress=0xescrow`,
       expect.objectContaining({
         method: 'GET',
         headers: {
@@ -936,7 +959,12 @@ describe('apiGetDepositById', () => {
     });
 
     await expect(
-      apiGetDepositById({ depositId: 'invalid-id!' }, mockApiKey, mockBaseUrl)
+      apiGetDepositById(
+        { depositId: 'invalid-id!' },
+        mockApiKey,
+        mockBaseUrl,
+        '0xescrow'
+      )
     ).rejects.toThrow('Invalid deposit ID format');
   });
 });
@@ -973,7 +1001,8 @@ describe('apiGetDepositsOrderStats', () => {
     const result = await apiGetDepositsOrderStats(
       { depositIds: [123, 456] },
       mockApiKey,
-      mockBaseUrl
+      mockBaseUrl,
+      '0xescrow'
     );
 
     expect(global.fetch).toHaveBeenCalledWith(
@@ -984,7 +1013,10 @@ describe('apiGetDepositsOrderStats', () => {
           'Content-Type': 'application/json',
           'x-api-key': mockApiKey,
         },
-        body: JSON.stringify({ depositIds: [123, 456] }),
+        body: JSON.stringify({
+          depositIds: [123, 456],
+          escrowAddress: '0xescrow',
+        }),
       })
     );
     expect(result.responseObject[0]?.totalIntents).toBe(10);
@@ -998,7 +1030,12 @@ describe('apiGetDepositsOrderStats', () => {
     });
 
     await expect(
-      apiGetDepositsOrderStats({ depositIds: [123] }, mockApiKey, mockBaseUrl)
+      apiGetDepositsOrderStats(
+        { depositIds: [123] },
+        mockApiKey,
+        mockBaseUrl,
+        '0xescrow'
+      )
     ).rejects.toThrow('Internal server error');
   });
 });

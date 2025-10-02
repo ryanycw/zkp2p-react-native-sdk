@@ -88,7 +88,8 @@ describe('Zkp2pClient', () => {
       expect(apiAdapter.apiGetDepositsOrderStats).toHaveBeenCalledWith(
         { depositIds: [123, 456] },
         'test-key',
-        'https://api.zkp2p.xyz/v1'
+        'https://api.zkp2p.xyz/v1',
+        client.addresses.escrow
       );
       expect(result).toEqual(mockResponse);
     });

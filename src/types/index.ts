@@ -251,6 +251,8 @@ export type QuoteIntentResponse = {
   processorIntentData: any;
   fiatCurrencyCode: string;
   chainId: string;
+  // Optional metadata from backend v2
+  escrowAddress?: string;
 };
 
 export type QuoteSingleResponse = {
@@ -362,6 +364,8 @@ export type Deposit = {
   createdAt: Date;
   updatedAt: Date;
   verifiers: DepositVerifier[];
+  // Optional metadata from backend v2
+  escrowAddress?: Address;
 };
 
 export type GetOwnerDepositsRequest = {
@@ -400,6 +404,10 @@ export type Intent = {
   prunedTimestamp: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  // Optional metadata from backend v2
+  escrowAddress?: Address;
+  orchestratorAddress?: Address;
+  paymentMethodHash?: string | null;
 };
 
 export type GetOwnerIntentsRequest = {

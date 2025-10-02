@@ -344,7 +344,12 @@ export class Zkp2pClient {
     params: GetOwnerDepositsRequest
   ): Promise<GetOwnerDepositsResponse> {
     const apiKey = this.assertApiKey('fetch account deposit history');
-    return apiGetOwnerDeposits(params, apiKey, this.baseApiUrl);
+    return apiGetOwnerDeposits(
+      params,
+      apiKey,
+      this.baseApiUrl,
+      this.addresses.escrow
+    );
   }
 
   /** Fetch historical intents for a given taker address with optional status filter. */
@@ -363,7 +368,12 @@ export class Zkp2pClient {
     params: GetDepositsOrderStatsRequest
   ): Promise<GetDepositsOrderStatsResponse> {
     const apiKey = this.assertApiKey('fetch deposit order stats');
-    return apiGetDepositsOrderStats(params, apiKey, this.baseApiUrl);
+    return apiGetDepositsOrderStats(
+      params,
+      apiKey,
+      this.baseApiUrl,
+      this.addresses.escrow
+    );
   }
 
   /**

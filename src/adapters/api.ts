@@ -28,6 +28,7 @@ import type {
 } from '../types';
 import { NetworkError, ValidationError } from '../errors';
 import { parseAPIError, withRetry } from '../errors/utils';
+import { buildQueryString } from '../utils/query';
 
 function headers() {
   return { 'Content-Type': 'application/json' } as const;
@@ -250,16 +251,19 @@ export async function apiValidatePayeeDetails(
 export async function apiGetOwnerDeposits(
   req: GetOwnerDepositsRequest,
   apiKey: string,
-  baseApiUrl: string
+  baseApiUrl: string,
+  escrowAddress?: string
 ): Promise<GetOwnerDepositsResponse> {
   return withRetry(async () => {
     let res: Response;
     let endpoint = `/deposits/maker/${req.ownerAddress}`;
 
-    // Add status query parameter if provided
-    if (req.status) {
-      endpoint += `?status=${req.status}`;
-    }
+    // Add required escrowAddress and optional status query parameters
+    const qs = buildQueryString({
+      escrowAddress,
+      status: req.status,
+    });
+    if (qs) endpoint += `?${qs}`;
 
     try {
       res = await fetch(`${baseApiUrl}${endpoint}`, {
@@ -294,11 +298,16 @@ export async function apiGetOwnerDeposits(
 export async function apiGetOwnerIntents(
   req: GetOwnerIntentsRequest,
   apiKey: string,
-  baseApiUrl: string
+  baseApiUrl: string,
+  escrowAddress?: string
 ): Promise<GetOwnerIntentsResponse> {
   return withRetry(async () => {
     let res: Response;
-    const endpoint = `/orders/maker/${req.ownerAddress}`;
+    let endpoint = `/orders/maker/${req.ownerAddress}`;
+
+    // Add required escrowAddress query parameter
+    const qs = buildQueryString({ escrowAddress });
+    if (qs) endpoint += `?${qs}`;
 
     try {
       res = await fetch(`${baseApiUrl}${endpoint}`, {
@@ -336,19 +345,19 @@ export async function apiGetOwnerIntents(
 export async function apiGetIntentsByDeposit(
   req: GetIntentsByDepositRequest,
   apiKey: string,
-  baseApiUrl: string
+  baseApiUrl: string,
+  escrowAddress?: string
 ): Promise<GetIntentsByDepositResponse> {
   return withRetry(async () => {
     let res: Response;
     let endpoint = `/orders/deposit/${req.depositId}`;
 
-    // Add status query parameter if provided
-    if (req.status) {
-      const statusParam = Array.isArray(req.status)
-        ? req.status.join(',')
-        : req.status;
-      endpoint += `?status=${statusParam}`;
-    }
+    // Add required escrowAddress and optional status query parameters
+    const qs = buildQueryString({
+      escrowAddress,
+      status: req.status,
+    });
+    if (qs) endpoint += `?${qs}`;
 
     try {
       res = await fetch(`${baseApiUrl}${endpoint}`, {
@@ -478,11 +487,14 @@ export async function apiGetIntentByHash(
 export async function apiGetDepositById(
   req: GetDepositByIdRequest,
   apiKey: string,
-  baseApiUrl: string
+  baseApiUrl: string,
+  escrowAddress?: string
 ): Promise<GetDepositByIdResponse> {
   return withRetry(async () => {
     let res: Response;
-    const endpoint = `/deposits/${req.depositId}`;
+    let endpoint = `/deposits/${req.depositId}`;
+    const qs = buildQueryString({ escrowAddress });
+    if (qs) endpoint += `?${qs}`;
 
     try {
       res = await fetch(`${baseApiUrl}${endpoint}`, {
@@ -518,7 +530,8 @@ export async function apiGetDepositById(
 export async function apiGetDepositsOrderStats(
   req: GetDepositsOrderStatsRequest,
   apiKey: string,
-  baseApiUrl: string
+  baseApiUrl: string,
+  escrowAddress?: string
 ): Promise<GetDepositsOrderStatsResponse> {
   return withRetry(async () => {
     let res: Response;
@@ -528,7 +541,7 @@ export async function apiGetDepositsOrderStats(
       res = await fetch(`${baseApiUrl}${endpoint}`, {
         method: 'POST',
         headers: createHeadersWithApiKey(apiKey),
-        body: JSON.stringify({ depositIds: req.depositIds }),
+        body: JSON.stringify({ depositIds: req.depositIds, escrowAddress }),
       });
     } catch (error) {
       throw new NetworkError('Failed to connect to API server', {
