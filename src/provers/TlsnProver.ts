@@ -109,9 +109,6 @@ export class TlsnProver {
       await this.initialize();
     }
 
-    // log the params
-    console.log('TLSN prove params:', params);
-
     const result = global.tlsnProve(
       params.mode,
       params.url,

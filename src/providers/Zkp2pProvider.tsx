@@ -57,7 +57,12 @@ import {
 import { Zkp2pClient } from '../client';
 import { BridgeFactory } from '../bridges/BridgeFactory';
 import type { GnarkBridge } from '../bridges/GnarkBridge';
-import { DEFAULT_USER_AGENT } from '../utils/constants';
+import { TlsnProver } from '../provers/TlsnProver';
+import {
+  DEFAULT_USER_AGENT,
+  TLSN_MAX_SENT_DATA,
+  TLSN_MAX_RECV_DATA,
+} from '../utils/constants';
 import { toDecimalString } from '../utils/format';
 import { parseReclaimProxyProof } from '../utils/reclaimProof';
 import { flowReducer, initialFlow } from './flowReducer';
@@ -99,7 +104,7 @@ type ConsentDecision = 'accept' | 'deny' | 'skip';
 interface Zkp2pProviderProps {
   children: ReactNode;
   witnessUrl?: string;
-  prover?: 'reclaim_gnark' | 'reclaim_snarkjs';
+  prover?: 'reclaim_gnark' | 'reclaim_snarkjs' | 'tlsn_prover';
   configBaseUrl?: string;
   rpcTimeout?: number;
   walletClient?: WalletClient;
@@ -107,6 +112,9 @@ interface Zkp2pProviderProps {
   chainId?: number;
   environment?: 'production' | 'staging';
   baseApiUrl?: string;
+  notaryHost?: string;
+  notaryPort?: number;
+  notaryTlsEnabled?: boolean;
   logLevel?: 'error' | 'info' | 'debug';
   storage?: Storage;
   renderConsentSheet?: (props: {
@@ -238,6 +246,9 @@ const Zkp2pProvider = ({
   logLevel,
   storage,
   renderConsentSheet,
+  notaryHost = '127.0.0.1', // TODO: Change to zkp2p production setup
+  notaryPort = 7047,
+  notaryTlsEnabled = false,
 }: Zkp2pProviderProps) => {
   // ==========================================================================
   // CLIENT INITIALIZATION
@@ -528,6 +539,13 @@ const Zkp2pProvider = ({
   const gnarkBridge = useMemo<GnarkBridge | null>(() => {
     if (prover === 'reclaim_gnark') {
       return BridgeFactory.getGnarkBridge();
+    }
+    return null;
+  }, [prover]);
+
+  const tlsnProver = useMemo<TlsnProver | null>(() => {
+    if (prover === 'tlsn_prover') {
+      return new TlsnProver();
     }
     return null;
   }, [prover]);
@@ -1418,7 +1436,11 @@ const Zkp2pProvider = ({
       logger.info('[zkp2p] Proof start: ensuring RPC ready');
       const sid = sessionIdRef.current;
       if (!payload) throw new Error('No authentication data');
-      if (prover !== 'reclaim_snarkjs' && prover !== 'reclaim_gnark') {
+      if (
+        prover !== 'reclaim_snarkjs' &&
+        prover !== 'reclaim_gnark' &&
+        prover !== 'tlsn_prover'
+      ) {
         throw new Error(`Unsupported prover: ${prover}`);
       }
 
@@ -1498,6 +1520,81 @@ const Zkp2pProvider = ({
               ? await calculateGnarkDynamicConcurrency()
               : 1,
         };
+
+        if (prover === 'tlsn_prover') {
+          if (!tlsnProver) {
+            throw new Error('TLSN prover not initialized');
+          }
+
+          let filledUrl = providerCfg.url;
+          Object.entries(paramValues).forEach(([key, value]) => {
+            filledUrl = filledUrl.replace(`{{${key}}}`, value);
+          });
+
+          await tlsnProver.initialize();
+
+          const mode = 0;
+          const userAgent = getCustomUserAgent(providerCfg);
+
+          const urlMatch = filledUrl.match(/^(https?):\/\/([^/:]+)(?::(\d+))?/);
+          if (!urlMatch || !urlMatch[1] || !urlMatch[2]) {
+            throw new Error(`Invalid URL format: ${filledUrl}`);
+          }
+          const protocol = urlMatch[1];
+          const providerHost = urlMatch[2];
+          const providerPort = urlMatch[3]
+            ? parseInt(urlMatch[3], 10)
+            : protocol === 'https'
+              ? 443
+              : 80;
+
+          // TLSN prove call with JSI
+          await tlsnProver.prove({
+            mode,
+            url: filledUrl,
+            cookie: secret.cookieStr ?? '',
+            accessToken: secret.headers['X-Access-Token'] ?? '',
+            userAgent,
+            providerHost,
+            providerPort,
+            notaryHost,
+            notaryPort,
+            notaryTlsEnabled,
+            maxSentData: TLSN_MAX_SENT_DATA,
+            maxRecvData: TLSN_MAX_RECV_DATA,
+          });
+
+          logger.info('[zkp2p] TLSN proof generated successfully');
+
+          // Create mock proof data for now (TLSN integration will need proper proof format)
+          const proof = {
+            claimInfo: {
+              provider: 'tlsn',
+              context: intentHash,
+              parameters: JSON.stringify(paramValues),
+            },
+            signedClaim: {
+              claim: {
+                identifier: filledUrl,
+                owner:
+                  '0x0123788edad59d7c013cdc85e4372f350f828e2cec62d9a2de4560e69aec7f89',
+                epoch: Math.floor(Date.now() / 1000),
+                timestampS: Math.floor(Date.now() / 1000),
+              },
+              signatures: ['0xMOCK_TLSN_SIGNATURE'],
+            },
+          };
+
+          const proofDataItem: ProofData = {
+            proofType: 'reclaim',
+            proof: proof as any,
+          };
+
+          setProofData([proofDataItem]);
+          dispatch({ type: 'PROOF_SUCCESS' });
+          return [proofDataItem];
+        }
+
         await ensureRpcReady();
         const res = await _rpcRequest('createClaim', rpc);
 
@@ -1659,7 +1756,11 @@ const Zkp2pProvider = ({
       itemIndex: number = 0
     ) => {
       if (!payload) throw new Error('No authentication data');
-      if (prover !== 'reclaim_snarkjs' && prover !== 'reclaim_gnark') {
+      if (
+        prover !== 'reclaim_snarkjs' &&
+        prover !== 'reclaim_gnark' &&
+        prover !== 'tlsn_prover'
+      ) {
         throw new Error(`Unsupported prover: ${prover}`);
       }
 
