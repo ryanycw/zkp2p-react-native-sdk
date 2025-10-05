@@ -155,3 +155,6 @@ export const DEFAULT_USER_AGENT = Platform.select({
   default:
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15',
 });
+
+export const TLSN_MAX_SENT_DATA = 4096;
+export const TLSN_MAX_RECV_DATA = 16384;
