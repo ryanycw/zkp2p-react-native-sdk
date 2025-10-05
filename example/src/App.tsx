@@ -17,7 +17,12 @@ import { AuthenticationScreen } from './screens/AuthenticationScreen';
 import { ProofScreen } from './screens/ProofScreen';
 import { ApiFunctionsScreen } from './screens/ApiFunctionsScreen';
 import { HomeScreen } from './screens/HomeScreen';
-import { ZKP2P_API_KEY } from '@env';
+import {
+  ZKP2P_API_KEY,
+  NOTARY_HOST,
+  NOTARY_PORT,
+  NOTARY_TLS_ENABLED,
+} from '@env';
 
 // Viem for local wallet client
 import {
@@ -316,8 +321,11 @@ function Zkp2pRoot({
       chainId={84532}
       witnessUrl="https://witness-proxy-dev.zkp2p.xyz"
       baseApiUrl="https://api-staging-testnet.zkp2p.xyz/v1"
+      notaryHost={NOTARY_HOST}
+      notaryPort={NOTARY_PORT}
+      notaryTlsEnabled={NOTARY_TLS_ENABLED}
       rpcTimeout={60000}
-      prover="reclaim_gnark"
+      prover="tlsn_prover"
       logLevel="debug"
       storage={authStorage}
       renderConsentSheet={({
