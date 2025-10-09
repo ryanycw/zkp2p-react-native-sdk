@@ -57,7 +57,7 @@ import {
 import { Zkp2pClient } from '../client';
 import { BridgeFactory } from '../bridges/BridgeFactory';
 import type { GnarkBridge } from '../bridges/GnarkBridge';
-import { TlsnProver } from '../provers/TlsnProver';
+import { tlsnInit, tlsnProve, validateTlsnResult } from '../provers/TlsnProver';
 import {
   DEFAULT_USER_AGENT,
   TLSN_MAX_SENT_DATA,
@@ -539,13 +539,6 @@ const Zkp2pProvider = ({
   const gnarkBridge = useMemo<GnarkBridge | null>(() => {
     if (prover === 'reclaim_gnark') {
       return BridgeFactory.getGnarkBridge();
-    }
-    return null;
-  }, [prover]);
-
-  const tlsnProver = useMemo<TlsnProver | null>(() => {
-    if (prover === 'tlsn_prover') {
-      return new TlsnProver();
     }
     return null;
   }, [prover]);
@@ -1522,19 +1515,12 @@ const Zkp2pProvider = ({
         };
 
         if (prover === 'tlsn_prover') {
-          if (!tlsnProver) {
-            throw new Error('TLSN prover not initialized');
-          }
+          validateTlsnResult(tlsnInit(), 'init');
 
           let filledUrl = providerCfg.url;
           Object.entries(paramValues).forEach(([key, value]) => {
             filledUrl = filledUrl.replace(`{{${key}}}`, value);
           });
-
-          await tlsnProver.initialize();
-
-          const mode = 0;
-          const userAgent = getCustomUserAgent(providerCfg);
 
           const urlMatch = filledUrl.match(/^(https?):\/\/([^/:]+)(?::(\d+))?/);
           if (!urlMatch || !urlMatch[1] || !urlMatch[2]) {
@@ -1548,21 +1534,23 @@ const Zkp2pProvider = ({
               ? 443
               : 80;
 
-          // TLSN prove call with JSI
-          await tlsnProver.prove({
-            mode,
-            url: filledUrl,
-            cookie: secret.cookieStr ?? '',
-            accessToken: secret.headers['X-Access-Token'] ?? '',
-            userAgent,
-            providerHost,
-            providerPort,
-            notaryHost,
-            notaryPort,
-            notaryTlsEnabled,
-            maxSentData: TLSN_MAX_SENT_DATA,
-            maxRecvData: TLSN_MAX_RECV_DATA,
-          });
+          validateTlsnResult(
+            tlsnProve(
+              0,
+              filledUrl,
+              secret.cookieStr ?? '',
+              secret.headers['X-Access-Token'] ?? '',
+              getCustomUserAgent(providerCfg),
+              providerHost,
+              providerPort,
+              notaryHost,
+              notaryPort,
+              notaryTlsEnabled,
+              TLSN_MAX_SENT_DATA,
+              TLSN_MAX_RECV_DATA
+            ),
+            'prove'
+          );
 
           logger.info('[zkp2p] TLSN proof generated successfully');
 

@@ -3,16 +3,12 @@
  * Direct bindings to TLSN native functions
  */
 
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules } from 'react-native';
 
-const TlsnModule = NativeModules.Zkp2pTlsnModule;
+const { Zkp2pTlsnModule } = NativeModules;
 
-// Install JSI bindings on iOS
-if (Platform.OS === 'ios' && TlsnModule?.install) {
-  const result = TlsnModule.install();
-  if (!result) {
-    console.error('Failed to install TLSN JSI bindings');
-  }
+if (!Zkp2pTlsnModule?.install()) {
+  throw new Error('Failed to install TLSN JSI bindings');
 }
 
 declare global {
@@ -73,79 +69,21 @@ declare global {
   var tlsnGetLastError: () => string | null;
 }
 
+export const tlsnInit = global.tlsnInit;
+export const tlsnProve = global.tlsnProve;
+export const tlsnVerify = global.tlsnVerify;
+export const tlsnCleanup = global.tlsnCleanup;
+export const tlsnGetLastError = global.tlsnGetLastError;
+
 /**
- * TLSN Prover wrapper
+ * Validates TLSN operation result and throws descriptive error if failed
+ * @param result The result code from TLSN operation
+ * @param operation The operation name for error message
+ * @throws Error if result is non-zero
  */
-export class TlsnProver {
-  private static nativeInitialized = false;
-
-  async initialize(): Promise<void> {
-    if (TlsnProver.nativeInitialized) return;
-
-    const result = global.tlsnInit();
-    if (result !== 0) {
-      const error = global.tlsnGetLastError();
-      throw new Error(`TLSN init failed: ${error || 'Unknown error'}`);
-    }
-
-    TlsnProver.nativeInitialized = true;
+export const validateTlsnResult = (result: number, operation: string): void => {
+  if (result !== 0) {
+    const error = tlsnGetLastError();
+    throw new Error(`TLSN ${operation} failed: ${error || 'Unknown error'}`);
   }
-
-  async prove(params: {
-    mode: number;
-    url: string;
-    cookie: string;
-    accessToken: string;
-    userAgent: string;
-    providerHost: string;
-    providerPort: number;
-    notaryHost: string;
-    notaryPort: number;
-    notaryTlsEnabled: boolean;
-    maxSentData: number;
-    maxRecvData: number;
-  }): Promise<void> {
-    if (!TlsnProver.nativeInitialized) {
-      await this.initialize();
-    }
-
-    const result = global.tlsnProve(
-      params.mode,
-      params.url,
-      params.cookie,
-      params.accessToken,
-      params.userAgent,
-      params.providerHost,
-      params.providerPort,
-      params.notaryHost,
-      params.notaryPort,
-      params.notaryTlsEnabled,
-      params.maxSentData,
-      params.maxRecvData
-    );
-
-    if (result !== 0) {
-      const error = global.tlsnGetLastError();
-      throw new Error(`TLSN prove failed: ${error || 'Unknown error'}`);
-    }
-  }
-
-  async verify(url: string, unauthedBytes: string): Promise<void> {
-    if (!TlsnProver.nativeInitialized) {
-      await this.initialize();
-    }
-
-    const result = global.tlsnVerify(url, unauthedBytes);
-    if (result !== 0) {
-      const error = global.tlsnGetLastError();
-      throw new Error(`TLSN verify failed: ${error || 'Unknown error'}`);
-    }
-  }
-
-  cleanup(): void {
-    if (TlsnProver.nativeInitialized) {
-      global.tlsnCleanup();
-      TlsnProver.nativeInitialized = false;
-    }
-  }
-}
+};
