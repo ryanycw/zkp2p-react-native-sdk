@@ -73,14 +73,16 @@ android {
     }
     
     externalNativeBuild {
-      ndkBuild {
-        arguments "NDK_DEBUG=1"
+      cmake {
+        arguments "-DANDROID_STL=c++_shared"
+        cppFlags "-std=c++17"
       }
     }
   }
 
   buildFeatures {
     buildConfig true
+    prefab true
   }
 
   buildTypes {
@@ -113,8 +115,8 @@ android {
   }
   
   externalNativeBuild {
-    ndkBuild {
-      path "src/main/jni/Android.mk"
+    cmake {
+      path "CMakeLists.txt"
     }
   }
 }
