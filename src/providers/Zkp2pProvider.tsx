@@ -246,7 +246,7 @@ const Zkp2pProvider = ({
   logLevel,
   storage,
   renderConsentSheet,
-  notaryHost = '127.0.0.1', // TODO: Change to zkp2p production setup
+  notaryHost = '10.0.2.2', //ios: '127.0.0.1', // TODO: Change to zkp2p production setup
   notaryPort = 7047,
   notaryTlsEnabled = false,
 }: Zkp2pProviderProps) => {
@@ -1515,7 +1515,10 @@ const Zkp2pProvider = ({
         };
 
         if (prover === 'tlsn_prover') {
-          validateTlsnResult(tlsnInit(), 'init');
+          const initResult = tlsnInit();
+          if (initResult !== 0 && initResult !== -1) {
+            validateTlsnResult(initResult, 'init');
+          }
 
           let filledUrl = providerCfg.url;
           Object.entries(paramValues).forEach(([key, value]) => {
