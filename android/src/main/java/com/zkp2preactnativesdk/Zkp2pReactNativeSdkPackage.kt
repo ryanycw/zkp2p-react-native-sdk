@@ -16,6 +16,7 @@ class Zkp2pReactNativeSdkPackage : BaseReactPackage() {
     return when (name) {
       Zkp2pReactNativeSdkModule.NAME -> Zkp2pReactNativeSdkModule(reactContext)
       Zkp2pGnarkModule.NAME -> Zkp2pGnarkModule(reactContext)
+      Zkp2pTlsnModule.NAME -> Zkp2pTlsnModule(reactContext)
       else -> null
     }
   }
@@ -38,6 +39,16 @@ class Zkp2pReactNativeSdkPackage : BaseReactPackage() {
       moduleInfos[Zkp2pGnarkModule.NAME] = ReactModuleInfo(
         Zkp2pGnarkModule.NAME,
         Zkp2pGnarkModule.NAME,
+        false,  // canOverrideExistingModule
+        false,  // needsEagerInit
+        false,  // isCxxModule
+        false   // isTurboModule
+      )
+
+      // TLSN proving module (Classic, not TurboModule)
+      moduleInfos[Zkp2pTlsnModule.NAME] = ReactModuleInfo(
+        Zkp2pTlsnModule.NAME,
+        Zkp2pTlsnModule.NAME,
         false,  // canOverrideExistingModule
         false,  // needsEagerInit
         false,  // isCxxModule
