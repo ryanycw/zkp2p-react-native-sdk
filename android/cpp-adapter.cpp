@@ -1,8 +1,13 @@
 #include <fbjni/fbjni.h>
 #include <jsi/jsi.h>
 #include <string>
+#include <android/log.h>
 
 #include "../cpp/libtlsnprover/tlsnprover.h"
+
+#define LOG_TAG "TlsnBridge"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace jsi = facebook::jsi;
 namespace jni = facebook::jni;
@@ -27,7 +32,9 @@ private:
         jsi::PropNameID::forAscii(*runtime, "tlsnInit"),
         0,
         [](jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) -> jsi::Value {
+            LOGI("Calling tlsn_init");
             int32_t result = tlsnprover::tlsn_init();
+            LOGI("tlsn_init returned: %d", result);
             return jsi::Value(result);
         }
     );
@@ -54,6 +61,8 @@ private:
             uintptr_t maxSentData = (uintptr_t)args[10].asNumber();
             uintptr_t maxRecvData = (uintptr_t)args[11].asNumber();
 
+            LOGI("Calling tlsn_prove: mode=%d, url=%s, notary=%s:%d", mode, url.c_str(), notaryHost.c_str(), notaryPort);
+
             int32_t result = tlsnprover::tlsn_prove(
                 mode, url.c_str(), cookie.c_str(), accessToken.c_str(),
                 userAgent.c_str(), providerHost.c_str(), providerPort,
@@ -61,6 +70,7 @@ private:
                 maxSentData, maxRecvData
             );
 
+            LOGI("tlsn_prove returned: %d", result);
             return jsi::Value(result);
         }
     );
@@ -75,7 +85,9 @@ private:
             if (count < 2) throw jsi::JSError(rt, "tlsnVerify requires 2 arguments");
             std::string url = args[0].asString(rt).utf8(rt);
             std::string unauthedBytes = args[1].asString(rt).utf8(rt);
+            LOGI("Calling tlsn_verify: url=%s", url.c_str());
             int32_t result = tlsnprover::tlsn_verify(url.c_str(), unauthedBytes.c_str());
+            LOGI("tlsn_verify returned: %d", result);
             return jsi::Value(result);
         }
     );
@@ -87,6 +99,7 @@ private:
         jsi::PropNameID::forAscii(*runtime, "tlsnCleanup"),
         0,
         [](jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) -> jsi::Value {
+            LOGI("Calling tlsn_cleanup");
             tlsnprover::tlsn_cleanup();
             return jsi::Value::undefined();
         }
@@ -101,6 +114,7 @@ private:
         [](jsi::Runtime& rt, const jsi::Value&, const jsi::Value* args, size_t count) -> jsi::Value {
             const char* error = tlsnprover::tlsn_get_last_error();
             if (error && strlen(error) > 0) {
+                LOGE("tlsn_get_last_error: %s", error);
                 return jsi::String::createFromUtf8(rt, error);
             }
             return jsi::Value::null();
